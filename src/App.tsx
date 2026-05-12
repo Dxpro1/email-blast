@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { GoogleGenAI } from "@google/genai";
 import { 
   Mail, 
@@ -14,7 +14,9 @@ import {
   ChevronRight,
   FileUp,
   BookOpen,
-  Info
+  Info,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -27,7 +29,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
-import { Toaster } from '@/components/ui/sonner';
+import { Toaster } from 'sonner';
 import { toast } from 'sonner';
 import {
   Select,
@@ -45,9 +47,47 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { auth, db, signInWithGoogle, signInWithEmailAndPassword, createUserWithEmailAndPassword, checkConnection } from './lib/firebase';
+import { onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs } from 'firebase/firestore';
 
 // Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  toast.error("Database error. Please try again.");
+}
 
 interface Contact {
   id: string;
@@ -109,6 +149,13 @@ Should you have any clarification, you may call or text (044) 940-5625 or 0919-0
 ];
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [dbConnected, setDbConnected] = useState<boolean | null>(null);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
@@ -124,12 +171,65 @@ export default function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
 
-  React.useEffect(() => {
+  // 2. Entity Validations
+  useEffect(() => {
+    checkConnection().then(setDbConnected);
+  }, []);
+
+  // Auth State Listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+      
+      if (u) {
+        // Save user profile if new
+        setDoc(doc(db, 'users', u.uid), {
+          uid: u.uid,
+          email: u.email,
+          displayName: u.displayName,
+          photoURL: u.photoURL,
+          updatedAt: serverTimestamp()
+        }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${u.uid}`));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch Config
+  useEffect(() => {
     fetch('/api/config-status')
       .then(res => res.json())
       .then(setConfigStatus)
       .catch(console.error);
   }, []);
+
+  // Firestore Listeners
+  useEffect(() => {
+    if (!user) {
+      setContacts([]);
+      setHistory([]);
+      return;
+    }
+
+    const contactsPath = `users/${user.uid}/contacts`;
+    const unsubContacts = onSnapshot(collection(db, contactsPath), (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contact));
+      setContacts(list);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, contactsPath));
+
+    const historyPath = `users/${user.uid}/history`;
+    const qHistory = query(collection(db, historyPath), orderBy('timestamp', 'desc'));
+    const unsubHistory = onSnapshot(qHistory, (snapshot) => {
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BlastHistory));
+      setHistory(list);
+    }, (err) => handleFirestoreError(err, OperationType.LIST, historyPath));
+
+    return () => {
+      unsubContacts();
+      unsubHistory();
+    };
+  }, [user]);
 
   const handleTemplateSelect = (templateId: string) => {
     const template = TEMPLATES.find(t => t.id === templateId);
@@ -140,42 +240,47 @@ export default function App() {
     }
   };
 
-  const handleCsvImport = () => {
-    if (!csvFile) return;
+  const handleCsvImport = async () => {
+    if (!csvFile || !user) return;
     
     Papa.parse(csvFile, {
       header: true,
       skipEmptyLines: true,
-      complete: (results) => {
-        const newContacts: Contact[] = results.data.map((row: any) => {
-          // Find email column (case-insensitive)
+      complete: async (results) => {
+        const batch: Contact[] = results.data.map((row: any) => {
           const emailKey = Object.keys(row).find(k => k.toLowerCase() === 'email');
           const email = emailKey ? row[emailKey] : '';
-          
-          // Find name column (case-insensitive)
           const nameKey = Object.keys(row).find(k => ['firstname', 'name', 'first name'].includes(k.toLowerCase()));
           const name = nameKey ? row[nameKey] : 'Unnamed';
           
           return {
-            id: crypto.randomUUID(),
             email: email.trim(),
             name: name.trim(),
-            ...row
-          };
-        }).filter(c => c.email && c.email.includes('@'));
+            ...row,
+            createdAt: new Date().toISOString()
+          } as any;
+        }).filter((c: any) => c.email && c.email.includes('@'));
 
-        if (newContacts.length === 0) {
+        if (batch.length === 0) {
           toast.error('No valid contacts with email addresses found in CSV');
           return;
         }
 
-        setContacts([...contacts, ...newContacts]);
-        setCsvFile(null);
-        setIsImporting(false);
-        toast.success(`Imported ${newContacts.length} contacts`);
-      },
-      error: (error) => {
-        toast.error(`CSV Error: ${error.message}`);
+        // Add to Firestore instead of state
+        toast.loading(`Importing ${batch.length} contacts...`);
+        try {
+          const contactsRef = collection(db, `users/${user.uid}/contacts`);
+          for (const contact of batch) {
+            await addDoc(contactsRef, contact);
+          }
+          toast.dismiss();
+          toast.success(`Imported ${batch.length} contacts`);
+          setCsvFile(null);
+          setIsImporting(false);
+        } catch (err) {
+          toast.dismiss();
+          handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/contacts`);
+        }
       }
     });
   };
@@ -191,7 +296,8 @@ export default function App() {
     return result;
   };
 
-  const addContact = () => {
+  const addContact = async () => {
+    if (!user) return;
     if (!newEmail || !newEmail.includes('@')) {
       toast.error('Please enter a valid email');
       return;
@@ -200,19 +306,70 @@ export default function App() {
       toast.error('Contact already exists');
       return;
     }
-    const contact: Contact = {
-      id: crypto.randomUUID(),
-      email: newEmail,
-      name: newName || undefined
-    };
-    setContacts([...contacts, contact]);
-    setNewEmail('');
-    setNewName('');
-    toast.success('Contact added');
+
+    try {
+      const contactsPath = `users/${user.uid}/contacts`;
+      await addDoc(collection(db, contactsPath), {
+        email: newEmail,
+        name: newName || undefined,
+        createdAt: new Date().toISOString()
+      });
+      setNewEmail('');
+      setNewName('');
+      toast.success('Contact added');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/contacts`);
+    }
   };
 
-  const removeContact = (id: string) => {
-    setContacts(contacts.filter(c => c.id !== id));
+  const removeContact = async (id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, `users/${user.uid}/contacts`, id));
+      toast.success('Contact removed');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/contacts/${id}`);
+    }
+  };
+  
+  const clearContacts = async () => {
+    if (!user) return;
+    if (!confirm('Are you sure you want to clear all contacts?')) return;
+    
+    try {
+      const contactsPath = `users/${user.uid}/contacts`;
+      const snapshot = await getDocs(collection(db, contactsPath));
+      for (const d of snapshot.docs) {
+        await deleteDoc(d.ref);
+      }
+      toast.success('All contacts cleared');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/contacts`);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authEmail || !authPassword) {
+      toast.error("Please enter email and password");
+      return;
+    }
+    
+    setIsAuthSubmitting(true);
+    try {
+      if (isRegistering) {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        toast.success("Account created!");
+      } else {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        toast.success("Welcome back!");
+      }
+    } catch (error: any) {
+      console.error("Auth Error:", error);
+      toast.error(error.message || "Authentication failed");
+    } finally {
+      setIsAuthSubmitting(false);
+    }
   };
 
   const generateContent = async () => {
@@ -256,8 +413,8 @@ export default function App() {
         const htmlBody = `
           <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <div style="background-color: #2563eb; padding: 30px 20px; text-align: center;">
-              <h1 style="color: white; margin: 0; font-size: 28px; letter-spacing: 2px; font-weight: 800;">ENCORE</h1>
-              <p style="color: #bfdbfe; margin: 5px 0 0 0; font-size: 12px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Leasing & Finance Corp.</p>
+              <img src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" alt="Encore Logo" style="height: 60px; width: auto; margin-bottom: 10px;" />
+              <p style="color: #bfdbfe; margin: 0; font-size: 11px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Leasing & Finance Corp.</p>
             </div>
             <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
               <div style="white-space: pre-wrap; font-size: 16px; color: #1f2937;">${personalizedBody}</div>
@@ -296,22 +453,24 @@ export default function App() {
       
       if (!response.ok) throw new Error(data.error || 'Failed to send');
 
-      const newHistory: BlastHistory = {
-        id: crypto.randomUUID(),
-        timestamp: new Date().toLocaleString(),
-        subject,
-        body,
-        recipientCount: contacts.length,
-        status: 'success'
-      };
+      // Save to Firestore History
+      if (user) {
+        const historyPath = `users/${user.uid}/history`;
+        await addDoc(collection(db, historyPath), {
+          timestamp: new Date().toLocaleString(),
+          subject,
+          body,
+          recipientCount: contacts.length,
+          status: 'success',
+          createdAt: new Date().toISOString()
+        });
+      }
 
-      setHistory([newHistory, ...history]);
       toast.success(`Blast sent to ${contacts.length} recipients!`);
       
-      // Clear form and contacts after successful blast
+      // Clear form after successful blast
       setSubject('');
       setBody('');
-      setContacts([]);
     } catch (error: any) {
       toast.error(error.message || 'Failed to send blast');
     } finally {
@@ -319,29 +478,184 @@ export default function App() {
     }
   };
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
+        >
+          <div className="bg-blue-600 p-8 flex flex-col items-center">
+            <img 
+              src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" 
+              alt="Encore Logo" 
+              className="h-14 w-auto brightness-0 invert"
+            />
+            <p className="text-blue-100 text-[10px] font-bold tracking-widest uppercase mt-3">Leasing & Finance Corp.</p>
+          </div>
+          <div className="p-8 space-y-6">
+            <div className="text-center">
+              <h2 className="text-2xl font-bold text-gray-900">
+                {isRegistering ? 'Create Account' : 'Portal Login'}
+              </h2>
+              <p className="text-gray-500 text-sm mt-1">
+                {isRegistering ? 'Register your employee credentials' : 'Access the Email Blast system'}
+              </p>
+            </div>
+
+            <form onSubmit={handleEmailAuth} className="space-y-4">
+              {dbConnected === false && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-red-700 text-xs">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  <p>Database connection failed. Check your Firebase config.</p>
+                </div>
+              )}
+              {dbConnected === true && (
+                <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-lg flex items-center gap-2 text-emerald-700 text-xs">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  <p>System Online: Database Connected</p>
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input 
+                  id="email"
+                  type="email" 
+                  placeholder="name@encorefinancials.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
+                  className="h-11"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input 
+                  id="password"
+                  type="password" 
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="h-11"
+                  required
+                />
+              </div>
+              <Button 
+                type="submit"
+                disabled={isAuthSubmitting}
+                className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-lg shadow-blue-200 transition-all"
+              >
+                {isAuthSubmitting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  isRegistering ? 'Create Account' : 'Sign In'
+                )}
+              </Button>
+            </form>
+
+            <div className="relative py-2">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-gray-100"></div>
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white px-2 text-gray-400">Or continue with</span>
+              </div>
+            </div>
+
+            <Button 
+              onClick={signInWithGoogle}
+              variant="outline"
+              className="w-full h-11 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 shadow-sm transition-all"
+            >
+              <img src="https://www.google.com/favicon.ico" className="w-4 h-4 mr-3" alt="Google" />
+              Google Authentication
+            </Button>
+
+            <div className="text-center">
+              <button 
+                onClick={() => setIsRegistering(!isRegistering)}
+                className="text-sm text-blue-600 hover:underline font-medium"
+              >
+                {isRegistering ? 'Already have an account? Sign in' : 'First time here? Create an account'}
+              </button>
+            </div>
+            
+            <p className="text-[10px] text-gray-400 text-center">
+              Restricted access. Authorized Encore employees only.
+            </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-blue-100">
-      <Toaster position="top-right" />
+      <Toaster position="top-right" richColors />
       
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <Mail className="text-white w-5 h-5" />
+          <div className="flex items-center gap-3">
+            <img 
+              src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" 
+              alt="Encore Logo" 
+              className="h-10 w-auto object-contain"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+              }}
+            />
+            <div className="hidden flex items-center gap-2">
+              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+                <Mail className="text-white w-5 h-5" />
+              </div>
+              <h1 className="text-xl font-bold tracking-tight">Encore</h1>
             </div>
-            <h1 className="text-xl font-bold tracking-tight">Encore</h1>
           </div>
-          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-6">
+              {dbConnected === true && (
+                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 hidden md:flex">
+                  <CheckCircle2 className="w-3 h-3" />
+                  Database Connected
+                </Badge>
+              )}
+              {dbConnected === false && (
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1 hidden md:flex">
+                  <AlertCircle className="w-3 h-3" />
+                  Database Disconnected
+                </Badge>
+              )}
             {configStatus && !configStatus.hasResendKey && (
               <Badge variant="destructive" className="animate-pulse">
                 <AlertCircle className="w-3 h-3 mr-1" />
                 Missing Resend Key
               </Badge>
             )}
-            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200 px-3 py-1">
-              Pro Account
-            </Badge>
+            <div className="flex items-center gap-3 pl-6 border-l border-gray-100">
+              <div className="text-right hidden sm:block">
+                <p className="text-xs font-bold text-gray-900 leading-none">{user.displayName || 'Team Member'}</p>
+                <p className="text-[10px] text-gray-500 mt-1">{user.email}</p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={() => signOut(auth)}
+                className="text-gray-400 hover:text-red-600 hover:bg-red-50"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         </div>
       </header>
@@ -451,7 +765,7 @@ export default function App() {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            onClick={() => setContacts([])}
+                            onClick={clearContacts}
                             className="text-white hover:bg-white/10"
                           >
                             <Trash2 className="w-4 h-4 mr-2" />
