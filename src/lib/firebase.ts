@@ -11,7 +11,8 @@ import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+const config = firebaseConfig as any;
+export const db = getFirestore(app, config.firestoreDatabaseId || 'ai-studio-69a653c2-f279-40ef-a977-9be443b34f45');
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
@@ -27,7 +28,7 @@ export const checkConnection = async () => {
     if (error.code === 'permission-denied' || (error.message && error.message.includes('permission'))) {
       return true;
     }
-    console.error("Firebase connection test failed:", error);
+    console.warn("Firebase connection test failed (expected if database is not initialized yet):", error.message || error);
     return false;
   }
 };

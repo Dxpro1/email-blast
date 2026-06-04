@@ -16,7 +16,8 @@ import {
   BookOpen,
   Info,
   LogOut,
-  User as UserIcon
+  User as UserIcon,
+  RefreshCw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -138,7 +139,7 @@ Should you have any clarification, you may call or text (044) 940-5625 or 0919-0
     id: 'birthday',
     name: 'Birthday',
     subject: 'Happy Birthday!',
-    body: `Happy Birthday #firstname! we wanted to take a moment to send you our warmest wishes. We hope your birthday is filled with joy, laughter, and everything you love. from your Encore Leasing & Finance Corp. Family`
+    body: `Happy Birthday #firstname! We wanted to take a moment to send you our warmest wishes. We hope your special day is filled with joy, laughter, and everything you love. Warmest regards from your Encore Leasing & Finance Corp. Family!`
   },
   {
     id: 'due_date',
@@ -171,9 +172,48 @@ export default function App() {
   const [isImporting, setIsImporting] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
 
+  const saveLocalContacts = (list: Contact[]) => {
+    if (user) {
+      localStorage.setItem(`encore_contacts_${user.uid}`, JSON.stringify(list));
+      setContacts(list);
+    }
+  };
+
+  const saveLocalHistory = (list: BlastHistory[]) => {
+    if (user) {
+      localStorage.setItem(`encore_history_${user.uid}`, JSON.stringify(list));
+      setHistory(list);
+    }
+  };
+
+  const [retryLoading, setRetryLoading] = useState(false);
+
+  const triggerConnectionCheck = async () => {
+    setRetryLoading(true);
+    try {
+      const isConnected = await checkConnection();
+      setDbConnected(isConnected);
+    } catch (e) {
+      setDbConnected(false);
+    } finally {
+      setRetryLoading(false);
+    }
+  };
+
   // 2. Entity Validations
   useEffect(() => {
-    checkConnection().then(setDbConnected);
+    triggerConnectionCheck();
+
+    // Periodically re-check connection state if currently disconnected (or not verified yet)
+    const interval = setInterval(async () => {
+      const isConnected = await checkConnection();
+      setDbConnected(isConnected);
+      if (isConnected) {
+        clearInterval(interval);
+      }
+    }, 6000);
+
+    return () => clearInterval(interval);
   }, []);
 
   // Auth State Listener
@@ -182,19 +222,21 @@ export default function App() {
       setUser(u);
       setAuthLoading(false);
       
-      if (u) {
-        // Save user profile if new
+      if (u && dbConnected === true) {
+        // Save user profile if new (only if connected to prevent offline error during init check)
         setDoc(doc(db, 'users', u.uid), {
           uid: u.uid,
           email: u.email,
           displayName: u.displayName,
           photoURL: u.photoURL,
           updatedAt: serverTimestamp()
-        }, { merge: true }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${u.uid}`));
+        }, { merge: true }).catch(err => {
+          console.warn("Skipping Firestore user-profile save (running in offline/local fallback mode):", err);
+        });
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [dbConnected]);
 
   // Fetch Config
   useEffect(() => {
@@ -204,7 +246,7 @@ export default function App() {
       .catch(console.error);
   }, []);
 
-  // Firestore Listeners
+  // Firestore Listeners & Local Fallback
   useEffect(() => {
     if (!user) {
       setContacts([]);
@@ -212,24 +254,56 @@ export default function App() {
       return;
     }
 
+    const localContactsKey = `encore_contacts_${user.uid}`;
+    const localHistoryKey = `encore_history_${user.uid}`;
+
+    if (dbConnected === false) {
+      // Offline fallback: read from local storage
+      const cachedContacts = localStorage.getItem(localContactsKey);
+      if (cachedContacts) {
+        try { setContacts(JSON.parse(cachedContacts)); } catch (_) {}
+      }
+      const cachedHistory = localStorage.getItem(localHistoryKey);
+      if (cachedHistory) {
+        try { setHistory(JSON.parse(cachedHistory)); } catch (_) {}
+      }
+      return;
+    }
+
+    if (dbConnected !== true) return; // Keep waiting for connection state to resolve
+
     const contactsPath = `users/${user.uid}/contacts`;
     const unsubContacts = onSnapshot(collection(db, contactsPath), (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contact));
       setContacts(list);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, contactsPath));
+      localStorage.setItem(localContactsKey, JSON.stringify(list));
+    }, (err) => {
+      console.warn("Contacts subscription failed, using local storage fallback", err);
+      const cachedContacts = localStorage.getItem(localContactsKey);
+      if (cachedContacts) {
+        try { setContacts(JSON.parse(cachedContacts)); } catch (_) {}
+      }
+    });
 
     const historyPath = `users/${user.uid}/history`;
     const qHistory = query(collection(db, historyPath), orderBy('timestamp', 'desc'));
     const unsubHistory = onSnapshot(qHistory, (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BlastHistory));
       setHistory(list);
-    }, (err) => handleFirestoreError(err, OperationType.LIST, historyPath));
+      localStorage.setItem(localHistoryKey, JSON.stringify(list));
+    }, (err) => {
+      console.warn("History subscription failed, using local storage fallback", err);
+      const cachedHistory = localStorage.getItem(localHistoryKey);
+      if (cachedHistory) {
+        try { setHistory(JSON.parse(cachedHistory)); } catch (_) {}
+      }
+    });
 
     return () => {
       unsubContacts();
       unsubHistory();
     };
-  }, [user]);
+  }, [user, dbConnected]);
 
   const handleTemplateSelect = (templateId: string) => {
     const template = TEMPLATES.find(t => t.id === templateId);
@@ -248,17 +322,115 @@ export default function App() {
       skipEmptyLines: true,
       complete: async (results) => {
         const batch: Contact[] = results.data.map((row: any) => {
-          const emailKey = Object.keys(row).find(k => k.toLowerCase() === 'email');
-          const email = emailKey ? row[emailKey] : '';
-          const nameKey = Object.keys(row).find(k => ['firstname', 'name', 'first name'].includes(k.toLowerCase()));
-          const name = nameKey ? row[nameKey] : 'Unnamed';
-          
-          return {
+          let email = '';
+          let name = '';
+          let firstname = '';
+          let yearmodel = '';
+          let unit = '';
+          let plate = '';
+          let expiry = '';
+          let amount = '';
+          let ddate = '';
+          let periodicins = '';
+
+          // Tolerance-based parsing: scan all headers (keys) in the CSV row
+          Object.keys(row).forEach(k => {
+            const val = typeof row[k] === 'string' ? row[k].trim() : String(row[k] || '').trim();
+            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+            // 1. Email check
+            if (cleanK.includes('email') || cleanK.includes('emailaddress')) {
+              if (val) email = val;
+            } else if ((cleanK === 'to' || cleanK === 'recipient' || cleanK === 'contact') && !email) {
+              if (val) email = val;
+            }
+
+            // 2. Name check
+            if (cleanK.includes('firstname') || cleanK.includes('first') || cleanK.includes('givenname') || cleanK.includes('given')) {
+              if (val) firstname = val;
+            } else if (cleanK.includes('name')) {
+              if (val) name = val;
+            }
+
+            // 3. Year Model check
+            if (cleanK.includes('yearmodel')) {
+              if (val) yearmodel = val;
+            } else if ((cleanK.includes('model') || cleanK.includes('year')) && !yearmodel) {
+              if (val) yearmodel = val;
+            }
+
+            // 4. Unit check
+            if (cleanK.includes('unit') || cleanK.includes('vehicle') || cleanK.includes('car')) {
+              if (val) unit = val;
+            }
+
+            // 5. Plate check
+            if (cleanK.includes('plate')) {
+              if (val) plate = val;
+            }
+
+            // 6. Expiry check
+            if (cleanK.includes('expiry') || cleanK.includes('expire') || cleanK.includes('expiration')) {
+              if (val) expiry = val;
+            }
+
+            // 7. Amount check
+            if (cleanK.includes('amount') || cleanK.includes('premium')) {
+              if (val) amount = val;
+            }
+
+            // 8. Due Date check
+            if (cleanK.includes('duedate') || cleanK.includes('ddate') || cleanK.includes('due') || cleanK.includes('date')) {
+              if (!cleanK.includes('expiry') && !cleanK.includes('expire') && !cleanK.includes('expiration')) {
+                if (val) ddate = val;
+              }
+            }
+
+            // 9. Periodic Insurance check
+            if (cleanK.includes('periodicins') || cleanK.includes('amortization') || cleanK.includes('periodic')) {
+              if (val) periodicins = val;
+            }
+          });
+
+          // Consolidate name and firstname values
+          if (!firstname && name) {
+            firstname = name;
+          }
+          if (!name && firstname) {
+            name = firstname;
+          }
+          if (!name) name = 'Unnamed';
+          if (!firstname) firstname = 'Unnamed';
+
+          // Build a normalized contact record
+          const normalizedContact: any = {
             email: email.trim(),
             name: name.trim(),
-            ...row,
+            firstname: firstname.trim(),
             createdAt: new Date().toISOString()
-          } as any;
+          };
+
+          if (yearmodel) normalizedContact.yearmodel = yearmodel.trim();
+          if (unit) normalizedContact.unit = unit.trim();
+          if (plate) normalizedContact.plate = plate.trim();
+          if (expiry) normalizedContact.expiry = expiry.trim();
+          if (amount) normalizedContact.amount = amount.trim();
+          if (ddate) normalizedContact.ddate = ddate.trim();
+          if (periodicins) normalizedContact.periodicins = periodicins.trim();
+
+          // Merge all original attributes and their lowercase cleaned variants to survive placeholder substitution
+          Object.keys(row).forEach(k => {
+            const val = typeof row[k] === 'string' ? row[k].trim() : String(row[k] || '').trim();
+            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            normalizedContact[cleanK] = val;
+            
+            const lowK = k.toLowerCase().replace(/\s+/g, '');
+            normalizedContact[lowK] = val;
+            
+            normalizedContact[k] = val;
+          });
+
+          return normalizedContact;
         }).filter((c: any) => c.email && c.email.includes('@'));
 
         if (batch.length === 0) {
@@ -266,20 +438,48 @@ export default function App() {
           return;
         }
 
-        // Add to Firestore instead of state
+        // Add to Firestore or state fallback
         toast.loading(`Importing ${batch.length} contacts...`);
         try {
-          const contactsRef = collection(db, `users/${user.uid}/contacts`);
-          for (const contact of batch) {
-            await addDoc(contactsRef, contact);
+          if (dbConnected === true) {
+            const contactsRef = collection(db, `users/${user.uid}/contacts`);
+            for (const contact of batch) {
+              await addDoc(contactsRef, contact);
+            }
+          } else {
+            const localBatch = batch.map(c => ({
+              id: Math.random().toString(36).substring(2, 11),
+              ...c
+            }));
+            const updated = [...contacts];
+            localBatch.forEach(c => {
+              if (!updated.some(uc => uc.email === c.email)) {
+                updated.push(c);
+              }
+            });
+            saveLocalContacts(updated);
           }
           toast.dismiss();
           toast.success(`Imported ${batch.length} contacts`);
           setCsvFile(null);
           setIsImporting(false);
         } catch (err) {
+          console.warn("CSV import to Firestore failed, falling back to local import", err);
+          const localBatch = batch.map(c => ({
+            id: Math.random().toString(36).substring(2, 11),
+            ...c
+          }));
+          const updated = [...contacts];
+          localBatch.forEach(c => {
+            if (!updated.some(uc => uc.email === c.email)) {
+              updated.push(c);
+            }
+          });
+          saveLocalContacts(updated);
           toast.dismiss();
-          handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/contacts`);
+          toast.success(`Imported ${batch.length} contacts (Local Mode)`);
+          setCsvFile(null);
+          setIsImporting(false);
         }
       }
     });
@@ -307,28 +507,52 @@ export default function App() {
       return;
     }
 
+    const newContactData = {
+      email: newEmail,
+      name: newName || undefined,
+      createdAt: new Date().toISOString()
+    };
+
     try {
-      const contactsPath = `users/${user.uid}/contacts`;
-      await addDoc(collection(db, contactsPath), {
-        email: newEmail,
-        name: newName || undefined,
-        createdAt: new Date().toISOString()
-      });
+      if (dbConnected === true) {
+        const contactsPath = `users/${user.uid}/contacts`;
+        await addDoc(collection(db, contactsPath), newContactData);
+      } else {
+        const localContact: Contact = {
+          id: Math.random().toString(36).substring(2, 11),
+          ...newContactData
+        };
+        saveLocalContacts([...contacts, localContact]);
+      }
       setNewEmail('');
       setNewName('');
       toast.success('Contact added');
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, `users/${user.uid}/contacts`);
+      console.warn("Write to Firestore failed, falling back to local addition", err);
+      const localContact: Contact = {
+        id: Math.random().toString(36).substring(2, 11),
+        ...newContactData
+      };
+      saveLocalContacts([...contacts, localContact]);
+      setNewEmail('');
+      setNewName('');
+      toast.success('Contact added (Local Mode)');
     }
   };
 
   const removeContact = async (id: string) => {
     if (!user) return;
     try {
-      await deleteDoc(doc(db, `users/${user.uid}/contacts`, id));
+      if (dbConnected === true) {
+        await deleteDoc(doc(db, `users/${user.uid}/contacts`, id));
+      } else {
+        saveLocalContacts(contacts.filter(c => c.id !== id));
+      }
       toast.success('Contact removed');
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/contacts/${id}`);
+      console.warn("Delete in Firestore failed, falling back to local deletion", err);
+      saveLocalContacts(contacts.filter(c => c.id !== id));
+      toast.success('Contact removed (Local Mode)');
     }
   };
   
@@ -337,14 +561,20 @@ export default function App() {
     if (!confirm('Are you sure you want to clear all contacts?')) return;
     
     try {
-      const contactsPath = `users/${user.uid}/contacts`;
-      const snapshot = await getDocs(collection(db, contactsPath));
-      for (const d of snapshot.docs) {
-        await deleteDoc(d.ref);
+      if (dbConnected === true) {
+        const contactsPath = `users/${user.uid}/contacts`;
+        const snapshot = await getDocs(collection(db, contactsPath));
+        for (const d of snapshot.docs) {
+          await deleteDoc(d.ref);
+        }
+      } else {
+        saveLocalContacts([]);
       }
       toast.success('All contacts cleared');
     } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `users/${user.uid}/contacts`);
+      console.warn("Clear in Firestore failed, falling back to local clear", err);
+      saveLocalContacts([]);
+      toast.success('All contacts cleared (Local Mode)');
     }
   };
 
@@ -393,6 +623,88 @@ export default function App() {
     }
   };
 
+  const generateEmailHtml = (subjectText: string, bodyText: string) => {
+    const isBirthday = subjectText.toLowerCase().includes('birthday') || bodyText.toLowerCase().includes('birthday');
+    const currentYear = new Date().getFullYear();
+
+    if (isBirthday) {
+      return `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); background-color: #ffffff;">
+          <!-- Corporate Branding Header -->
+          <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #f1f5f9;">
+            <img src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+          </div>
+
+          <!-- Celebration Banner -->
+          <div style="background: linear-gradient(135deg, #102CA4 0%, #1d3dbd 100%); padding: 35px 25px; text-align: center; position: relative;">
+            <div style="display: inline-block; background-color: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255, 255, 255, 0.3); padding: 8px 18px; border-radius: 30px;">
+              <span style="color: #FFDF00; font-size: 13px; font-weight: bold; letter-spacing: 2px; text-transform: uppercase;">🎂 BIRTHDAY GREETING</span>
+            </div>
+          </div>
+          
+          <!-- Festive Gold Stripe -->
+          <div style="height: 5px; background: linear-gradient(90deg, #D4AF37, #F3E5AB, #D4AF37);"></div>
+          
+          <!-- Content Card -->
+          <div style="padding: 45px 35px; line-height: 1.8; background-color: #ffffff;">
+            <div style="font-size: 48px; margin-bottom: 20px; text-align: center;">🎉</div>
+            <div style="white-space: pre-wrap; font-size: 16px; color: #2d3748; line-height: 1.8;">${bodyText}</div>
+            
+            <!-- Encouragement Block -->
+            <div style="background-color: #f0f2fc; border-left: 4px solid #102CA4; padding: 18px; border-radius: 0 8px 8px 0; text-align: left; margin-top: 35px; margin-bottom: 25px;">
+              <p style="margin: 0; font-size: 14px; color: #0d238f; font-weight: 600; font-style: italic; line-height: 1.6;">
+                "May this special day bring you endless joy, success, and prosperity in all your endeavors. We are truly honored to have you as a valued part of our Encore family!"
+              </p>
+            </div>
+
+            <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #f1f5f9; text-align: left;">
+              <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Warmest regards,</p>
+              <p style="margin: 5px 0 0 0; font-size: 15px; color: #102CA4; font-weight: 700;">Encore Leasing & Finance Corp. Family</p>
+            </div>
+          </div>
+          
+          <!-- Footer -->
+          <div style="background-color: #f8fafc; padding: 30px 25px; text-align: center; border-top: 1px solid #e2e8f0;">
+            <div style="margin-bottom: 18px;">
+              <a href="https://encorefinancials.com/" style="color: #102CA4; text-decoration: none; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; border-bottom: 1.5px solid #102CA4; padding-bottom: 2px;">Visit our Website</a>
+            </div>
+            <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
+            <p style="margin: 8px 0 0 0; font-size: 10px; color: #94a3b8; line-height: 1.6;">
+              (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
+              Encore Building, Maharlika Highway, Cabanatuan City
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #ffffff;">
+        <!-- Corporate Branding Header -->
+        <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 3px solid #102CA4;">
+          <img src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+        </div>
+        <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
+          <div style="white-space: pre-wrap; font-size: 15px; color: #1f2937;">${bodyText}</div>
+          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
+            <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Best regards,</p>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #102CA4; font-weight: 700;">Encore Leasing & Finance Corp. Team</p>
+          </div>
+        </div>
+        <div style="background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #e2e8f0;">
+          <div style="margin-bottom: 15px;">
+            <a href="https://encorefinancials.com/" style="color: #102CA4; text-decoration: none; font-size: 12px; font-weight: 600;">Visit our Website</a>
+          </div>
+          <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
+          <p style="margin: 8px 0 0 0; font-size: 10px; color: #94a3b8;">
+            (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
+            Encore Building, Maharlika Highway, Cabanatuan City
+          </p>
+        </div>
+      </div>
+    `;
+  };
+
   const sendBlast = async () => {
     if (contacts.length === 0) {
       toast.error('No recipients. Please import a CSV file or add contacts manually.');
@@ -409,32 +721,7 @@ export default function App() {
         const personalizedBody = replacePlaceholders(body, contact);
         const personalizedSubject = replacePlaceholders(subject, contact);
         
-        // Wrap in HTML template matching company design
-        const htmlBody = `
-          <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-            <div style="background-color: #2563eb; padding: 30px 20px; text-align: center;">
-              <img src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" alt="Encore Logo" style="height: 60px; width: auto; margin-bottom: 10px;" />
-              <p style="color: #bfdbfe; margin: 0; font-size: 11px; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Leasing & Finance Corp.</p>
-            </div>
-            <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
-              <div style="white-space: pre-wrap; font-size: 16px; color: #1f2937;">${personalizedBody}</div>
-              <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
-                <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Best regards,</p>
-                <p style="margin: 5px 0 0 0; font-size: 14px; color: #2563eb; font-weight: 700;">Encore Leasing & Finance Corp. Team</p>
-              </div>
-            </div>
-            <div style="background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #e2e8f0;">
-              <div style="margin-bottom: 15px;">
-                <a href="https://encorefinancials.com/" style="color: #2563eb; text-decoration: none; font-size: 12px; font-weight: 600;">Visit our Website</a>
-              </div>
-              <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${new Date().getFullYear()} Encore Leasing & Finance Corp. All rights reserved.</p>
-              <p style="margin: 8px 0 0 0; font-size: 10px; color: #94a3b8;">
-                (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
-                Encore Building, Maharlika Highway, Cabanatuan City
-              </p>
-            </div>
-          </div>
-        `;
+        const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
 
         return {
           to: [contact.email],
@@ -454,16 +741,35 @@ export default function App() {
       if (!response.ok) throw new Error(data.error || 'Failed to send');
 
       // Save to Firestore History
+      const historyItem = {
+        timestamp: new Date().toLocaleString(),
+        subject,
+        body,
+        recipientCount: contacts.length,
+        status: 'success' as const,
+        createdAt: new Date().toISOString()
+      };
+
       if (user) {
-        const historyPath = `users/${user.uid}/history`;
-        await addDoc(collection(db, historyPath), {
-          timestamp: new Date().toLocaleString(),
-          subject,
-          body,
-          recipientCount: contacts.length,
-          status: 'success',
-          createdAt: new Date().toISOString()
-        });
+        try {
+          if (dbConnected === true) {
+            const historyPath = `users/${user.uid}/history`;
+            await addDoc(collection(db, historyPath), historyItem);
+          } else {
+            const localHistItem = {
+              id: Math.random().toString(36).substring(2, 11),
+              ...historyItem
+            };
+            saveLocalHistory([localHistItem, ...history]);
+          }
+        } catch (histErr) {
+          console.warn("Failed to write to online history, saving locally:", histErr);
+          const localHistItem = {
+            id: Math.random().toString(36).substring(2, 11),
+            ...historyItem
+          };
+          saveLocalHistory([localHistItem, ...history]);
+        }
       }
 
       toast.success(`Blast sent to ${contacts.length} recipients!`);
@@ -494,13 +800,28 @@ export default function App() {
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
         >
-          <div className="bg-blue-600 p-8 flex flex-col items-center">
+          <div className="bg-brand-600 p-8 flex flex-col items-center justify-center">
             <img 
               src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" 
               alt="Encore Logo" 
-              className="h-14 w-auto brightness-0 invert"
+              className="h-14 w-auto object-contain brightness-0 invert"
+              referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const sibling = e.currentTarget.nextElementSibling;
+                if (sibling) {
+                  sibling.classList.remove('hidden');
+                  sibling.classList.add('flex');
+                }
+              }}
             />
-            <p className="text-blue-100 text-[10px] font-bold tracking-widest uppercase mt-3">Leasing & Finance Corp.</p>
+            <div className="hidden flex-col items-center">
+              <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mb-2">
+                <Mail className="text-white w-6 h-6" />
+              </div>
+              <h1 className="text-2xl font-black tracking-[4px] text-white m-0">ENCORE</h1>
+            </div>
+            <p className="text-brand-100 text-[10px] font-bold tracking-widest uppercase mt-3">Leasing & Finance Corp.</p>
           </div>
           <div className="p-8 space-y-6">
             <div className="text-center">
@@ -514,9 +835,38 @@ export default function App() {
 
             <form onSubmit={handleEmailAuth} className="space-y-4">
               {dbConnected === false && (
-                <div className="p-3 bg-red-50 border border-red-100 rounded-lg flex items-center gap-2 text-red-700 text-xs">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                  <p>Database connection failed. Check your Firebase config.</p>
+                <div className="p-3.5 bg-red-50 border border-red-100 rounded-lg flex flex-col gap-2 text-red-700 text-xs shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <p className="font-semibold text-red-800">Database Connection Failed (Offline Mode)</p>
+                      <p className="mt-1 text-red-600 leading-relaxed">
+                        Since you connected your custom Firebase project <strong>email-blast-68861</strong>, you must ensure that <strong>Cloud Firestore</strong> is initialized/enabled in your Firebase Console.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-1.5 pl-6 border-t border-red-100 pt-2 text-[11px] text-red-600 space-y-1">
+                    <p className="font-medium text-red-700">How to fix this in your Firebase Console:</p>
+                    <ol className="list-decimal list-inside space-y-0.5 ml-1">
+                      <li>Go to <a href="https://console.firebase.google.com/project/email-blast-68861/firestore" target="_blank" rel="noopener noreferrer" className="underline font-medium hover:text-red-800">Firebase Console Firestore</a></li>
+                      <li>Click <strong>"Create database"</strong>.</li>
+                      <li>Select <strong>Production mode</strong>.</li>
+                      <li>Choose your preferred region (e.g., <strong>asia-southeast1</strong>) and click <strong>Enable</strong>.</li>
+                    </ol>
+                  </div>
+                  <div className="mt-2 pl-6 flex">
+                    <Button 
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={triggerConnectionCheck}
+                      disabled={retryLoading}
+                      className="bg-white hover:bg-red-100/50 border-red-200 text-red-700 hover:text-red-800 text-[11px] h-8 flex items-center gap-1.5"
+                    >
+                      <RefreshCw className={`w-3 h-3 ${retryLoading ? 'animate-spin' : ''}`} />
+                      <span>{retryLoading ? 'Checking Database...' : 'Test / Retry Connection Now'}</span>
+                    </Button>
+                  </div>
                 </div>
               )}
               {dbConnected === true && (
@@ -552,7 +902,7 @@ export default function App() {
               <Button 
                 type="submit"
                 disabled={isAuthSubmitting}
-                className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-lg shadow-blue-200 transition-all"
+                className="w-full h-11 bg-brand-600 hover:bg-brand-700 text-white font-medium shadow-lg shadow-brand-200 transition-all"
               >
                 {isAuthSubmitting ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -583,7 +933,7 @@ export default function App() {
             <div className="text-center">
               <button 
                 onClick={() => setIsRegistering(!isRegistering)}
-                className="text-sm text-blue-600 hover:underline font-medium"
+                className="text-sm text-brand-600 hover:underline font-medium"
               >
                 {isRegistering ? 'Already have an account? Sign in' : 'First time here? Create an account'}
               </button>
@@ -599,7 +949,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-blue-100">
+    <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-brand-100">
       <Toaster position="top-right" richColors />
       
       {/* Header */}
@@ -610,13 +960,18 @@ export default function App() {
               src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" 
               alt="Encore Logo" 
               className="h-10 w-auto object-contain"
+              referrerPolicy="no-referrer"
               onError={(e) => {
                 e.currentTarget.style.display = 'none';
-                e.currentTarget.nextElementSibling?.classList.remove('hidden');
+                const sibling = e.currentTarget.nextElementSibling;
+                if (sibling) {
+                  sibling.classList.remove('hidden');
+                  sibling.classList.add('flex');
+                }
               }}
             />
-            <div className="hidden flex items-center gap-2">
-              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+            <div className="hidden items-center gap-2">
+              <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center">
                 <Mail className="text-white w-5 h-5" />
               </div>
               <h1 className="text-xl font-bold tracking-tight">Encore</h1>
@@ -630,10 +985,22 @@ export default function App() {
                 </Badge>
               )}
               {dbConnected === false && (
-                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1 hidden md:flex">
-                  <AlertCircle className="w-3 h-3" />
-                  Database Disconnected
-                </Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1 hidden md:flex">
+                    <AlertCircle className="w-3 h-3" />
+                    Database Disconnected
+                  </Badge>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={triggerConnectionCheck}
+                    disabled={retryLoading}
+                    className="h-7 text-xs px-2 text-[#4B5563] hover:text-[#111827] hover:bg-gray-100 flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${retryLoading ? 'animate-spin' : ''}`} />
+                    <span>{retryLoading ? 'Checking...' : 'Check Database'}</span>
+                  </Button>
+                </div>
               )}
             {configStatus && !configStatus.hasResendKey && (
               <Badge variant="destructive" className="animate-pulse">
@@ -664,15 +1031,15 @@ export default function App() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
           <div className="flex items-center justify-between">
             <TabsList className="bg-white border border-gray-200 p-1 h-12">
-              <TabsTrigger value="compose" className="px-6 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+              <TabsTrigger value="compose" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
                 <Send className="w-4 h-4 mr-2" />
                 Compose & Blast
               </TabsTrigger>
-              <TabsTrigger value="contacts" className="px-6 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+              <TabsTrigger value="contacts" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
                 <Users className="w-4 h-4 mr-2" />
                 Recipients ({contacts.length})
               </TabsTrigger>
-              <TabsTrigger value="history" className="px-6 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700">
+              <TabsTrigger value="history" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
                 <History className="w-4 h-4 mr-2" />
                 History
               </TabsTrigger>
@@ -682,7 +1049,7 @@ export default function App() {
               <Button 
                 onClick={sendBlast} 
                 disabled={isSending || !subject || !body}
-                className="bg-blue-600 hover:bg-blue-700 text-white px-8 shadow-lg shadow-blue-200 transition-all active:scale-95"
+                className="bg-brand-600 hover:bg-brand-700 text-white px-8 shadow-lg shadow-brand-200 transition-all active:scale-95"
               >
                 {isSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
                 Send Blast Now
@@ -702,18 +1069,18 @@ export default function App() {
               >
                 <div className="lg:col-span-2 space-y-6">
                   <Card className="border-gray-200 shadow-sm overflow-hidden">
-                    <div className="bg-blue-600 px-6 py-4 flex items-center justify-between text-white">
+                    <div className="bg-brand-600 px-6 py-4 flex items-center justify-between text-white">
                       <div className="flex items-center gap-3">
                         <FileUp className="w-5 h-5" />
                         <div>
                           <p className="font-bold leading-none">Step 1: Import Data</p>
-                          <p className="text-xs text-blue-100 mt-1">Upload your CSV file to start</p>
+                          <p className="text-xs text-brand-100 mt-1">Upload your CSV file to start</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <Dialog open={isImporting} onOpenChange={setIsImporting}>
                           <DialogTrigger render={
-                            <Button variant="secondary" size="sm" className="bg-white text-blue-600 hover:bg-blue-50 border-none">
+                            <Button variant="secondary" size="sm" className="bg-white text-brand-600 hover:bg-brand-50 border-none">
                               <FileUp className="w-4 h-4 mr-2" />
                               {contacts.length > 0 ? 'Change File' : 'Upload CSV'}
                             </Button>
@@ -748,9 +1115,9 @@ export default function App() {
                                   )}
                                 </label>
                               </div>
-                              <div className="bg-blue-50 p-3 rounded-lg flex gap-3">
-                                <Info className="w-5 h-5 text-blue-600 shrink-0" />
-                                <p className="text-xs text-blue-800 leading-relaxed">
+                              <div className="bg-brand-50 p-3 rounded-lg flex gap-3">
+                                <Info className="w-5 h-5 text-brand-600 shrink-0" />
+                                <p className="text-xs text-brand-800 leading-relaxed">
                                   <strong>Tip:</strong> Ensure your CSV has an <strong>email</strong> column and a <strong>firstname</strong> column. Other columns like <strong>plate</strong> or <strong>amount</strong> will be used for placeholders.
                                 </p>
                               </div>
@@ -775,12 +1142,12 @@ export default function App() {
                       </div>
                     </div>
                     {contacts.length > 0 && (
-                      <div className="px-6 py-2 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
-                        <span className="text-xs font-medium text-blue-700 flex items-center">
+                      <div className="px-6 py-2 bg-brand-50 border-b border-brand-100 flex items-center justify-between">
+                        <span className="text-xs font-medium text-brand-700 flex items-center">
                           <CheckCircle2 className="w-3 h-3 mr-1" />
                           {contacts.length} recipients loaded
                         </span>
-                        <Button variant="link" className="text-[10px] h-auto p-0 text-blue-600" onClick={() => setActiveTab('contacts')}>
+                        <Button variant="link" className="text-[10px] h-auto p-0 text-brand-600" onClick={() => setActiveTab('contacts')}>
                           View List →
                         </Button>
                       </div>
@@ -800,14 +1167,14 @@ export default function App() {
                             size="sm"
                             onClick={() => setIsPreviewOpen(true)}
                             disabled={!body}
-                            className="border-blue-200 text-blue-600 hover:bg-blue-50"
+                            className="border-brand-200 text-brand-600 hover:bg-brand-50"
                           >
                             <Info className="w-4 h-4 mr-2" />
                             Preview
                           </Button>
                           <Select onValueChange={handleTemplateSelect}>
                             <SelectTrigger className="w-[200px] bg-white">
-                              <BookOpen className="w-4 h-4 mr-2 text-blue-600" />
+                              <BookOpen className="w-4 h-4 mr-2 text-brand-600" />
                               <SelectValue placeholder="Select Template" />
                             </SelectTrigger>
                             <SelectContent>
@@ -827,7 +1194,7 @@ export default function App() {
                           placeholder="e.g. Special Offer: 20% Off Everything!" 
                           value={subject}
                           onChange={(e) => setSubject(e.target.value)}
-                          className="h-12 border-gray-200 focus:ring-blue-500"
+                          className="h-12 border-gray-200 focus:ring-brand-500"
                         />
                       </div>
                       <div className="space-y-2">
@@ -838,7 +1205,7 @@ export default function App() {
                             size="sm" 
                             onClick={generateContent}
                             disabled={isGenerating}
-                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            className="text-brand-600 hover:text-brand-700 hover:bg-brand-50"
                           >
                             {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
                             Optimize with AI
@@ -847,7 +1214,7 @@ export default function App() {
                         <Textarea 
                           id="body" 
                           placeholder="Write your email here..." 
-                          className="min-h-[300px] border-gray-200 focus:ring-blue-500 leading-relaxed"
+                          className="min-h-[300px] border-gray-200 focus:ring-brand-500 leading-relaxed"
                           value={body}
                           onChange={(e) => setBody(e.target.value)}
                         />
@@ -907,7 +1274,7 @@ export default function App() {
                     </CardContent>
                   </Card>
 
-                  <Card className="bg-blue-600 text-white border-none shadow-xl shadow-blue-200">
+                  <Card className="bg-brand-600 text-white border-none shadow-xl shadow-brand-200">
                     <CardContent className="pt-6">
                       <div className="flex items-start gap-4">
                         <div className="p-2 bg-white/20 rounded-lg">
@@ -915,7 +1282,7 @@ export default function App() {
                         </div>
                         <div>
                           <p className="font-bold mb-1">AI Tip</p>
-                          <p className="text-sm text-blue-100 leading-relaxed">
+                          <p className="text-sm text-brand-100 leading-relaxed">
                             Personalized subject lines increase open rates by 26%. Try including a name placeholder!
                           </p>
                         </div>
@@ -989,7 +1356,7 @@ export default function App() {
                           {contacts.map((contact) => (
                             <div 
                               key={contact.id} 
-                              className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-blue-200 hover:shadow-md transition-all group"
+                              className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-brand-200 hover:shadow-md transition-all group"
                             >
                               <div className="flex items-center gap-4">
                                 <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center font-bold text-gray-600">
@@ -1067,7 +1434,7 @@ export default function App() {
                                   <Button 
                                     variant="ghost" 
                                     size="sm" 
-                                    className="text-blue-600 hover:bg-blue-50"
+                                    className="text-brand-600 hover:bg-brand-50"
                                     onClick={() => setSelectedHistory(item)}
                                   >
                                     Details
@@ -1141,14 +1508,14 @@ export default function App() {
             </DialogDescription>
           </DialogHeader>
           <div className="mt-4 border rounded-lg overflow-hidden bg-gray-100 p-4 flex justify-center">
-            <div className="bg-white w-full max-w-[600px] shadow-sm rounded-lg overflow-hidden border border-gray-200">
-              <div className="bg-blue-600 p-8 text-center">
-                <h1 className="text-white text-3xl font-extrabold tracking-widest m-0">ENCORE</h1>
-                <p className="text-blue-100 text-[10px] uppercase font-bold mt-1 tracking-wider">Leasing & Finance Corp.</p>
-              </div>
-              <div className="p-10 bg-white min-h-[200px]">
-                <div className="whitespace-pre-wrap text-gray-800 leading-relaxed text-base">
-                  {body ? body.replace(/#firstname/gi, 'Valued Client')
+            {(() => {
+              const previewSubject = subject || '';
+              const previewBody = body || '';
+              const isBdayPreview = previewSubject.toLowerCase().includes('birthday') || previewBody.toLowerCase().includes('birthday');
+              const currentYear = new Date().getFullYear();
+              
+              const replacedBody = previewBody
+                ? previewBody.replace(/#firstname/gi, 'JEFFREY')
                              .replace(/#yearmodel/gi, '2024')
                              .replace(/#unit/gi, 'Toyota Fortuner')
                              .replace(/#plate/gi, 'ABC 1234')
@@ -1156,24 +1523,123 @@ export default function App() {
                              .replace(/#amount/gi, '15,000.00')
                              .replace(/#ddate/gi, 'April 15, 2026')
                              .replace(/#periodicins/gi, '12,500.00')
-                         : 'No content to preview.'}
+                : 'No content to preview.';
+
+              if (isBdayPreview) {
+                return (
+                  <div className="bg-white w-full max-w-[600px] shadow-sm rounded-xl overflow-hidden border border-gray-200 font-sans">
+                    {/* Corporate Branding Header */}
+                    <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center justify-center">
+                      <img 
+                        src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" 
+                        alt="Encore Logo" 
+                        className="h-12 w-auto object-contain"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.currentTarget.style.display = 'none';
+                          const sibling = e.currentTarget.nextElementSibling;
+                          if (sibling) {
+                            sibling.classList.remove('hidden');
+                            sibling.classList.add('flex');
+                          }
+                        }}
+                      />
+                      <div className="hidden flex-col items-center">
+                        <h1 className="text-xl font-black tracking-[4px] text-[#102CA4] m-0">ENCORE</h1>
+                        <p className="text-gray-500 text-[9px] font-bold tracking-[1.5px] uppercase m-0 mt-1">Leasing & Finance Corp.</p>
+                      </div>
+                    </div>
+
+                    {/* Celebration Banner */}
+                    <div className="bg-gradient-to-r from-[#102CA4] to-[#1d3dbd] p-8 text-center">
+                      <div className="inline-block bg-white/15 border border-white/30 px-4 py-1.5 rounded-full">
+                        <span className="text-[#FFDF00] text-[11px] font-bold tracking-[2px] uppercase">🎂 BIRTHDAY GREETING</span>
+                      </div>
+                    </div>
+                    
+                    {/* Festive Gold Stripe */}
+                    <div className="h-[5px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#D4AF37]"></div>
+                    
+                    {/* Content Card */}
+                    <div className="p-10 bg-white">
+                      <div className="text-5xl text-center mb-6">🎉</div>
+                      <div className="whitespace-pre-wrap text-[15px] text-gray-700 leading-relaxed text-left">
+                        {replacedBody}
+                      </div>
+                      
+                      {/* Encouragement Block */}
+                      <div className="border-l-4 border-[#102CA4] bg-brand-50 p-4 rounded-r-lg text-left mt-8 mb-6">
+                        <p className="m-0 text-xs text-brand-700 font-semibold italic leading-relaxed">
+                          "May this special day bring you endless joy, success, and prosperity in all your endeavors. We are truly honored to have you as a valued part of our Encore family!"
+                        </p>
+                      </div>
+
+                      <div className="mt-10 pt-6 border-t border-gray-100 text-left">
+                        <p className="m-0 text-sm text-gray-600 font-semibold">Warmest regards,</p>
+                        <p className="m-1 text-sm text-brand-600 font-extrabold">Encore Leasing & Finance Corp. Family</p>
+                      </div>
+                    </div>
+                    
+                    {/* Footer */}
+                    <div className="bg-gray-50 p-6 text-center border-t border-gray-100">
+                      <div className="mb-4">
+                        <a href="https://encorefinancials.com/" className="text-brand-600 hover:text-brand-700 no-underline text-xs font-bold leading-none border-b border-brand-600 pb-0.5">Visit our Website</a>
+                      </div>
+                      <p className="text-[10px] text-gray-500 m-0">&copy; {currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
+                      <p className="text-[9px] text-gray-400 mt-2 leading-relaxed">
+                        (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
+                        Encore Building, Maharlika Highway, Cabanatuan City
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="bg-white w-full max-w-[600px] shadow-sm rounded-lg overflow-hidden border border-gray-200">
+                  {/* Corporate Branding Header */}
+                  <div className="bg-white p-6 border-b-2 border-[#102CA4] flex flex-col items-center justify-center">
+                    <img 
+                      src="https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png" 
+                      alt="Encore Logo" 
+                      className="h-12 w-auto object-contain"
+                      referrerPolicy="no-referrer"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const sibling = e.currentTarget.nextElementSibling;
+                        if (sibling) {
+                          sibling.classList.remove('hidden');
+                          sibling.classList.add('flex');
+                        }
+                      }}
+                    />
+                    <div className="hidden flex-col items-center">
+                      <h1 className="text-xl font-black tracking-[4px] text-[#102CA4] m-0">ENCORE</h1>
+                      <p className="text-gray-500 text-[9px] font-bold tracking-[1.5px] uppercase m-0 mt-1">Leasing & Finance Corp.</p>
+                    </div>
+                  </div>
+                  <div className="p-10 bg-white min-h-[200px]">
+                    <div className="whitespace-pre-wrap text-gray-800 leading-relaxed text-base text-left">
+                      {replacedBody}
+                    </div>
+                    <div className="mt-10 pt-6 border-t border-gray-100 text-left">
+                      <p className="m-0 text-sm text-gray-600 font-semibold">Best regards,</p>
+                      <p className="m-1 text-sm text-brand-600 font-bold">Encore Leasing & Finance Corp. Team</p>
+                    </div>
+                  </div>
+                  <div className="bg-gray-50 p-6 text-center border-t border-gray-100">
+                    <div className="mb-4">
+                      <a href="https://encorefinancials.com/" className="text-brand-600 no-underline text-xs font-semibold">Visit our Website</a>
+                    </div>
+                    <p className="text-[10px] text-gray-500 m-0">&copy; {currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
+                    <p className="text-[9px] text-gray-400 mt-2 leading-relaxed">
+                      (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
+                      Encore Building, Maharlika Highway, Cabanatuan City
+                    </p>
+                  </div>
                 </div>
-                <div className="mt-10 pt-6 border-t border-gray-100">
-                  <p className="m-0 text-sm text-gray-600 font-semibold">Best regards,</p>
-                  <p className="m-1 text-sm text-blue-600 font-bold">Encore Leasing & Finance Corp. Team</p>
-                </div>
-              </div>
-              <div className="bg-gray-50 p-6 text-center border-t border-gray-100">
-                <div className="mb-4">
-                  <a href="https://encorefinancials.com/" className="text-blue-600 no-underline text-xs font-semibold">Visit our Website</a>
-                </div>
-                <p className="text-[10px] text-gray-500 m-0">&copy; {new Date().getFullYear()} Encore Leasing & Finance Corp. All rights reserved.</p>
-                <p className="text-[9px] text-gray-400 mt-2 leading-relaxed">
-                  (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
-                  Encore Building, Maharlika Highway, Cabanatuan City
-                </p>
-              </div>
-            </div>
+              );
+            })()}
           </div>
           <DialogFooter>
             <Button onClick={() => setIsPreviewOpen(false)}>Close Preview</Button>
