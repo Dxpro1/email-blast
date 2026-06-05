@@ -128,59 +128,60 @@ async function startServer() {
       // Ensure logo cache is populated/active
       const logoData = await getLogoAsBase64();
 
-      // Resend batch API supports up to 100 emails per call
-      // For more, we would need to chunk it
-      const CHUNK_SIZE = 100;
       const results = [];
       
-      for (let i = 0; i < messages.length; i += CHUNK_SIZE) {
-        const chunk = messages.slice(i, i + CHUNK_SIZE).map((msg: any) => {
-          let emailHtml = msg.body;
-          const attachments: any[] = [];
-          
-          if (logoData) {
-            const possibleUrls = [
-              'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
-              '/assets/img/logo.png',
-              '/assets/img/logo.svg',
-              'logo.png',
-              'logo.svg'
-            ];
-            
-            let matched = false;
-            for (const url of possibleUrls) {
-              if (emailHtml.includes(url)) {
-                emailHtml = emailHtml.split(url).join('cid:logo');
-                matched = true;
-              }
-            }
-            
-            if (matched) {
-              attachments.push({
-                filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
-                content: logoData.base64,
-                contentId: 'logo',
-                contentType: logoData.type || 'image/svg+xml'
-              });
-            }
-          }
-
-          const msgPayload: any = {
-            from: 'Encore <no-reply@encorefinancials.com>',
-            to: msg.to,
-            subject: msg.subject,
-            html: emailHtml,
-          };
-
-          if (attachments.length > 0) {
-            msgPayload.attachments = attachments;
-          }
-
-          return msgPayload;
-        });
+      for (const msg of messages) {
+        let emailHtml = msg.body;
+        const attachments: any[] = [];
+        let hasAttachment = false;
         
-        const { data, error } = await activeResend.batch.send(chunk);
-        results.push({ data, error });
+        if (logoData) {
+          const possibleUrls = [
+            'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+            '/assets/img/logo.png',
+            '/assets/img/logo.svg',
+            'logo.png',
+            'logo.svg'
+          ];
+          
+          let matched = false;
+          for (const url of possibleUrls) {
+            if (emailHtml.includes(url)) {
+              emailHtml = emailHtml.split(url).join('cid:logo');
+              matched = true;
+            }
+          }
+          
+          if (matched) {
+            attachments.push({
+              filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
+              content: logoData.base64,
+              contentId: 'logo',
+              contentType: logoData.type || 'image/svg+xml'
+            });
+            hasAttachment = true;
+            console.log(`[send-blast] Replaced logo URL with cid:logo for recipient: ${msg.to}`);
+          }
+        }
+
+        const msgPayload: any = {
+          from: 'Encore <no-reply@encorefinancials.com>',
+          to: msg.to,
+          subject: msg.subject,
+          html: emailHtml,
+        };
+
+        if (attachments.length > 0) {
+          msgPayload.attachments = attachments;
+          console.log(`[send-blast] Sending email with ${attachments.length} attachment(s) to ${msg.to}`);
+        }
+
+        // Resend batch API doesn't support attachments, so send individual emails when attachments present
+        const result = hasAttachment 
+          ? await activeResend.emails.send(msgPayload)
+          : await activeResend.emails.send(msgPayload);
+        
+        results.push(result);
       }
 
       res.json({ results });
