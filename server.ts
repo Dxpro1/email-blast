@@ -112,9 +112,10 @@ async function startServer() {
   });
 
   app.post('/api/send-blast', async (req, res) => {
-    if (!resend) {
+    if (!process.env.RESEND_API_KEY) {
       return res.status(500).json({ error: 'RESEND_API_KEY is not configured on the server.' });
     }
+    const activeResend = new Resend(process.env.RESEND_API_KEY);
 
     const { messages } = req.body;
 
@@ -143,8 +144,9 @@ async function startServer() {
               emailHtml = emailHtml.split(targetUrl).join('cid:logo');
               attachments.push({
                 filename: 'logo.png',
-                content: logoData.base64,
-                cid: 'logo'
+                content: Buffer.from(logoData.base64, 'base64'),
+                cid: 'logo',
+                contentType: logoData.type || 'image/png'
               });
             }
           }
@@ -163,7 +165,7 @@ async function startServer() {
           return msgPayload;
         });
         
-        const { data, error } = await resend.batch.send(chunk);
+        const { data, error } = await activeResend.batch.send(chunk);
         results.push({ data, error });
       }
 

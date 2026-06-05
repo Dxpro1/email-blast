@@ -56,15 +56,17 @@ async function getLogoAsBase64() {
   return { base64: cachedLogoBase64, type: cachedLogoType };
 }
 
-// API Routes
-app.get('/api/config-status', (req, res) => {
+// API Router
+const router = express.Router();
+
+router.get('/config-status', (req, res) => {
   res.json({
     hasResendKey: !!process.env.RESEND_API_KEY,
     hasGeminiKey: !!process.env.GEMINI_API_KEY
   });
 });
 
-app.post('/api/generate-content', async (req, res) => {
+router.post('/generate-content', async (req, res) => {
   const { subject } = req.body;
   if (!subject) {
     return res.status(400).json({ error: 'Subject is required.' });
@@ -96,7 +98,7 @@ app.post('/api/generate-content', async (req, res) => {
   }
 });
 
-app.post('/api/send-blast', async (req, res) => {
+router.post('/send-blast', async (req, res) => {
   if (!process.env.RESEND_API_KEY) {
     return res.status(500).json({ error: 'RESEND_API_KEY is not configured on the server.' });
   }
@@ -121,11 +123,13 @@ app.post('/api/send-blast', async (req, res) => {
         if (logoData) {
           const targetUrl = 'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png';
           if (emailHtml.includes(targetUrl)) {
+            // Replace all occurrences of the WordPress URL with our inline Attachment CID reference
             emailHtml = emailHtml.split(targetUrl).join('cid:logo');
             attachments.push({
               filename: 'logo.png',
-              content: logoData.base64,
-              cid: 'logo'
+              content: Buffer.from(logoData.base64, 'base64'),
+              cid: 'logo',
+              contentType: logoData.type || 'image/png'
             });
           }
         }
@@ -154,5 +158,9 @@ app.post('/api/send-blast', async (req, res) => {
     res.status(500).json({ error: 'Failed to send blast' });
   }
 });
+
+// Register on both /api and / to handle Vercel's path rewriting seamlessly
+app.use('/api', router);
+app.use('/', router);
 
 export default app;
