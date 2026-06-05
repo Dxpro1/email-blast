@@ -639,7 +639,7 @@ export default function App() {
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); background-color: #ffffff;">
           <!-- Corporate Branding Header -->
           <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #f1f5f9;">
-            <img src="/assets/img/logo.svg" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+            <img src="/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Celebration Banner -->
@@ -689,7 +689,7 @@ export default function App() {
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #ffffff;">
         <!-- Corporate Branding Header -->
         <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 3px solid #102CA4;">
-          <img src="/assets/img/logo.svg" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+          <img src="/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
         </div>
         <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
           <div style="white-space: pre-wrap; font-size: 15px; color: #1f2937;">${bodyText}</div>
@@ -743,9 +743,17 @@ export default function App() {
         body: JSON.stringify({ messages })
       });
 
-      const data = await response.json();
-      
-      if (!response.ok) throw new Error(data.error || 'Failed to send');
+      const text = await response.text();
+      let data = {} as any;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        data = { error: text || 'Failed to send' };
+      }
+
+      if (!response.ok) {
+        throw new Error(data?.error || 'Failed to send');
+      }
 
       // Save to Firestore History
       const historyItem = {
@@ -809,7 +817,7 @@ export default function App() {
         >
           <div className="bg-brand-600 p-8 flex flex-col items-center justify-center">
             <img 
-              src="/assets/img/logo.svg" 
+              src="/assets/img/logo.png" 
               alt="Encore Logo" 
               className="h-14 w-auto object-contain brightness-0 invert"
               referrerPolicy="no-referrer"
@@ -964,7 +972,7 @@ export default function App() {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <img 
-              src="/assets/img/logo.svg" 
+              src="/assets/img/logo.png" 
               alt="Encore Logo" 
               className="h-10 w-auto object-contain"
               referrerPolicy="no-referrer"
@@ -1538,7 +1546,7 @@ export default function App() {
                     {/* Corporate Branding Header */}
                     <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center justify-center">
                       <img 
-                        src="/assets/img/logo.svg" 
+                        src="/assets/img/logo.png" 
                         alt="Encore Logo" 
                         className="h-12 w-auto object-contain"
                         referrerPolicy="no-referrer"
@@ -1607,7 +1615,7 @@ export default function App() {
                   {/* Corporate Branding Header */}
                   <div className="bg-white p-6 border-b-2 border-[#102CA4] flex flex-col items-center justify-center">
                     <img 
-                      src="/assets/img/logo.svg" 
+                      src="/assets/img/logo.png" 
                       alt="Encore Logo" 
                       className="h-12 w-auto object-contain"
                       referrerPolicy="no-referrer"
