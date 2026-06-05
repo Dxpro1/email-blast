@@ -137,7 +137,6 @@ async function startServer() {
         
         if (logoData) {
           const possibleUrls = [
-            'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
             '/assets/img/logo.png',
             '/assets/img/logo.svg',
             'logo.png',
