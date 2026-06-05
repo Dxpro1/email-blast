@@ -3,6 +3,7 @@ import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { Resend } from 'resend';
 import dotenv from 'dotenv';
+import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
@@ -76,6 +77,38 @@ async function startServer() {
       hasResendKey: !!process.env.RESEND_API_KEY,
       hasGeminiKey: !!process.env.GEMINI_API_KEY
     });
+  });
+
+  app.post('/api/generate-content', async (req, res) => {
+    const { subject } = req.body;
+    if (!subject) {
+      return res.status(400).json({ error: 'Subject is required.' });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY is not configured on the server.' });
+    }
+
+    try {
+      const ai = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: `Write a professional marketing email body for the subject: "${subject}". Keep it concise, engaging, and include a call to action. Return only the email body text.`,
+      });
+
+      res.json({ text: response.text || '' });
+    } catch (error: any) {
+      console.error('Gemini content generation error:', error);
+      res.status(500).json({ error: error.message || 'Failed to generate content' });
+    }
   });
 
   app.post('/api/send-blast', async (req, res) => {

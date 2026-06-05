@@ -1,5 +1,4 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { GoogleGenAI } from "@google/genai";
 import { 
   Mail, 
   Users, 
@@ -52,8 +51,7 @@ import { auth, db, signInWithGoogle, signInWithEmailAndPassword, createUserWithE
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs } from 'firebase/firestore';
 
-// Initialize Gemini
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Initialize Gemini is handled server-side to protect keys and prevent browser environment crashes
 
 enum OperationType {
   CREATE = 'create',
@@ -609,15 +607,24 @@ export default function App() {
     }
     setIsGenerating(true);
     try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Write a professional marketing email body for the subject: "${subject}". Keep it concise, engaging, and include a call to action. Return only the email body text.`,
+      const response = await fetch('/api/generate-content', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ subject })
       });
-      setBody(response.text || '');
+      
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to generate content');
+      }
+
+      setBody(data.text || '');
       toast.success('Content generated!');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      toast.error('Failed to generate content');
+      toast.error(error.message || 'Failed to generate content');
     } finally {
       setIsGenerating(false);
     }
