@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 120" width="500" height="120">
+      <rect width="100%" height="100%" fill="transparent"/>
+      <g transform="translate(10, 10)">
+        <path d="M 15 15 L 75 15 L 90 55 L 30 55 Z" fill="#102CA4" />
+        <path d="M 40 62 L 100 62 L 115 102 L 55 102 Z" fill="#D4AF37" />
+        <rect x="15" y="56" width="85" height="4" fill="#102CA4" opacity="0.35" />
+        <text x="135" y="58" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-weight="900" font-size="44" letter-spacing="5" fill="#102CA4">ENCORE</text>
+        <text x="137" y="90" font-family="'Inter', 'Segoe UI', Arial, sans-serif" font-weight="700" font-size="16" letter-spacing="2" fill="#5c6f84">LEASING &amp; FINANCE CORP.</text>
+      </g>
+    </svg>

@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { Resend } from 'resend';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
@@ -39,27 +40,18 @@ async function startServer() {
       return { base64: cachedLogoBase64, type: cachedLogoType };
     }
 
+    // Try reading local SVG file saved in public directory
     try {
-      console.log('Attempting to pre-fetch corporate logo from official domain...');
-      const response = await fetch('https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png', {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-          'Referer': 'https://encorefinancials.com/'
-        }
-      });
-
-      if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        cachedLogoType = response.headers.get('content-type') || 'image/png';
-        cachedLogoBase64 = Buffer.from(arrayBuffer).toString('base64');
-        console.log(`Corporate logo cached successfully (${cachedLogoBase64.length} bytes, type: ${cachedLogoType})`);
+      const localSvgPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.svg');
+      if (fs.existsSync(localSvgPath)) {
+        const fileContent = fs.readFileSync(localSvgPath);
+        cachedLogoBase64 = fileContent.toString('base64');
+        cachedLogoType = 'image/svg+xml';
+        console.log(`Loaded company logo from local file: ${localSvgPath} (${fileContent.length} bytes)`);
         return { base64: cachedLogoBase64, type: cachedLogoType };
-      } else {
-        console.warn(`Failed to fetch logo from official domain (HTTP Status: ${response.status}). Activating high-fidelity vector corporate logo fallback...`);
       }
-    } catch (error) {
-      console.warn('Error fetching logo from official domain, activating high-fidelity vector corporate logo fallback...', error);
+    } catch (err) {
+      console.warn('Error reading local SVG logo file:', err);
     }
 
     // Fallback gracefully to our beautiful built-in vector representation
@@ -138,15 +130,28 @@ async function startServer() {
           const attachments: any[] = [];
           
           if (logoData) {
-            const targetUrl = 'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png';
-            if (emailHtml.includes(targetUrl)) {
-              // Replace all occurrences of the WordPress URL with our inline Attachment CID reference
-              emailHtml = emailHtml.split(targetUrl).join('cid:logo');
+            const possibleUrls = [
+              'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+              '/assets/img/logo.png',
+              '/assets/img/logo.svg',
+              'logo.png',
+              'logo.svg'
+            ];
+            
+            let matched = false;
+            for (const url of possibleUrls) {
+              if (emailHtml.includes(url)) {
+                emailHtml = emailHtml.split(url).join('cid:logo');
+                matched = true;
+              }
+            }
+            
+            if (matched) {
               attachments.push({
-                filename: 'logo.png',
+                filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
                 content: Buffer.from(logoData.base64, 'base64'),
                 cid: 'logo',
-                contentType: logoData.type || 'image/png'
+                contentType: logoData.type || 'image/svg+xml'
               });
             }
           }
