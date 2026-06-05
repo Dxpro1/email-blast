@@ -40,8 +40,17 @@ async function startServer() {
       return { base64: cachedLogoBase64, type: cachedLogoType };
     }
 
-    // Try reading local SVG file saved in public directory
+    // Prefer a local PNG for CID/email clients, then fall back to SVG if PNG is unavailable.
     try {
+      const localPngPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.png');
+      if (fs.existsSync(localPngPath)) {
+        const fileContent = fs.readFileSync(localPngPath);
+        cachedLogoBase64 = fileContent.toString('base64');
+        cachedLogoType = 'image/png';
+        console.log(`Loaded company logo from local file: ${localPngPath} (${fileContent.length} bytes)`);
+        return { base64: cachedLogoBase64, type: cachedLogoType };
+      }
+
       const localSvgPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.svg');
       if (fs.existsSync(localSvgPath)) {
         const fileContent = fs.readFileSync(localSvgPath);
@@ -51,10 +60,10 @@ async function startServer() {
         return { base64: cachedLogoBase64, type: cachedLogoType };
       }
     } catch (err) {
-      console.warn('Error reading local SVG logo file:', err);
+      console.warn('Error reading local logo file:', err);
     }
 
-    // Fallback gracefully to our beautiful built-in vector representation
+    // Fallback gracefully to our built-in vector representation
     cachedLogoBase64 = fallbackBase64;
     cachedLogoType = fallbackType;
     return { base64: cachedLogoBase64, type: cachedLogoType };
