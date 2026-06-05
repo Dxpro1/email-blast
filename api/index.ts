@@ -146,8 +146,8 @@ router.post('/send-blast', async (req, res) => {
           if (matched) {
             attachments.push({
               filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
-              content: Buffer.from(logoData.base64, 'base64'),
-              cid: 'logo',
+              content: logoData.base64,
+              contentId: 'logo',
               contentType: logoData.type || 'image/svg+xml'
             });
           }
