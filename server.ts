@@ -18,7 +18,7 @@ async function startServer() {
   const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
   // Cache for the company logo to avoid fetching on every single email
-  let cachedLogoBase64: string | null = null;
+  let cachedLogoBase64: string = '';
   let cachedLogoType: string = 'image/png';
 
   // High-fidelity standard SVG branding brand asset to use as a fallback
@@ -40,23 +40,23 @@ async function startServer() {
       return { base64: cachedLogoBase64, type: cachedLogoType };
     }
 
-    // Prefer a local SVG for email embeds to avoid embedding a very large PNG file.
+    // Prefer a local PNG for email embeds to use the actual company logo file.
     try {
-      const localSvgPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.svg');
-      if (fs.existsSync(localSvgPath)) {
-        const fileContent = fs.readFileSync(localSvgPath);
-        cachedLogoBase64 = fileContent.toString('base64');
-        cachedLogoType = 'image/svg+xml';
-        console.log(`Loaded company logo from local file: ${localSvgPath} (${fileContent.length} bytes)`);
-        return { base64: cachedLogoBase64, type: cachedLogoType };
-      }
-
       const localPngPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.png');
       if (fs.existsSync(localPngPath)) {
         const fileContent = fs.readFileSync(localPngPath);
         cachedLogoBase64 = fileContent.toString('base64');
         cachedLogoType = 'image/png';
         console.log(`Loaded company logo from local file: ${localPngPath} (${fileContent.length} bytes)`);
+        return { base64: cachedLogoBase64, type: cachedLogoType };
+      }
+
+      const localSvgPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.svg');
+      if (fs.existsSync(localSvgPath)) {
+        const fileContent = fs.readFileSync(localSvgPath);
+        cachedLogoBase64 = fileContent.toString('base64');
+        cachedLogoType = 'image/svg+xml';
+        console.log(`Loaded company logo from local file: ${localSvgPath} (${fileContent.length} bytes)`);
         return { base64: cachedLogoBase64, type: cachedLogoType };
       }
     } catch (err) {
@@ -150,7 +150,7 @@ async function startServer() {
           continue;
         }
 
-        // Clean output HTML body and replace relative logo paths with a local data URI
+        // Clean output HTML body and replace relative logo paths with a CID attachment reference
         let emailHtml = msg.body;
         const possibleLocalUrls = [
           '/assets/img/logo.png',
@@ -158,24 +158,36 @@ async function startServer() {
           'logo.png',
           'logo.svg'
         ];
-        let embeddedDataUri: string | null = null;
+        let logoData: { base64: string; type: string } | null = null;
+        let useAttachment = false;
 
         for (const url of possibleLocalUrls) {
           if (emailHtml.includes(url)) {
-            if (!embeddedDataUri) {
-              const logoData = await getLogoAsBase64();
-              embeddedDataUri = `data:${logoData.type};base64,${logoData.base64}`;
+            if (!logoData) {
+              logoData = await getLogoAsBase64();
             }
-            emailHtml = emailHtml.split(url).join(embeddedDataUri);
+            emailHtml = emailHtml.split(url).join('cid:logo');
+            useAttachment = true;
           }
         }
 
-        validMessages.push({
+        const messagePayload: any = {
           to: recipient,
           subject: msg.subject,
           htmlBody: emailHtml,
           originalTo: msg.to
-        });
+        };
+
+        if (useAttachment && logoData) {
+          messagePayload.attachments = [{
+            filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
+            content: logoData.base64,
+            contentType: logoData.type,
+            contentId: 'logo'
+          }];
+        }
+
+        validMessages.push(messagePayload);
       }
 
       // If no valid messages left to send, return immediately
