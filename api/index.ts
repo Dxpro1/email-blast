@@ -142,28 +142,41 @@ router.post('/send-blast', async (req, res) => {
         continue;
       }
 
-      // Clean output HTML body to replace relative paths with hosted logo URL
+      // Clean output HTML body to replace relative paths with inline CID logo references
       let emailHtml = msg.body;
-      const possibleUrls = [
-        'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+      const possibleLocalUrls = [
         '/assets/img/logo.png',
         '/assets/img/logo.svg',
         'logo.png',
         'logo.svg'
       ];
-      
-      for (const url of possibleUrls) {
+      let embedLogo = false;
+
+      for (const url of possibleLocalUrls) {
         if (emailHtml.includes(url)) {
-          emailHtml = emailHtml.split(url).join('https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png');
+          emailHtml = emailHtml.split(url).join('cid:logo');
+          embedLogo = true;
         }
       }
 
-      validMessages.push({
+      const messagePayload: any = {
         to: recipient,
         subject: msg.subject,
         htmlBody: emailHtml,
         originalTo: msg.to
-      });
+      };
+
+      if (embedLogo) {
+        const logoData = await getLogoAsBase64();
+        messagePayload.attachments = [{
+          filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
+          content: logoData.base64,
+          contentId: 'logo',
+          contentType: logoData.type || 'image/png'
+        }];
+      }
+
+      validMessages.push(messagePayload);
     }
 
     // If no valid messages left to send, return immediately
@@ -182,7 +195,8 @@ router.post('/send-blast', async (req, res) => {
             from: 'Encore <no-reply@encorefinancials.com>',
             to: msg.to,
             subject: msg.subject,
-            html: msg.htmlBody
+            html: msg.htmlBody,
+            attachments: msg.attachments
           });
 
           if (individualRes && individualRes.error) {
