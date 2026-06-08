@@ -1,6 +1,0 @@
-{
-  "name": "Encore Email Blast Portal",
-  "description": "Professional email blasting and relationship management platform for Encore Leasing & Finance Corp., featuring AI-powered content generation and secure Firebase integration.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}

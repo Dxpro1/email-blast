@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 async function downloadLogo() {
-  const targetUrl = 'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png';
+  const targetUrl = 'https://encorefinancials.com/assets/images/application-settings/logo-dark.png';
   const imgDir = path.join(process.cwd(), 'public', 'assets', 'img');
   
   // Ensure the directory exists

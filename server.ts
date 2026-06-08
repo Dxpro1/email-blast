@@ -18,7 +18,7 @@ async function startServer() {
   const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
   // Cache for the company logo to avoid fetching on every single email
-  let cachedLogoBase64: string = '';
+  let cachedLogoBase64: string | null = null;
   let cachedLogoType: string = 'image/png';
 
   // High-fidelity standard SVG branding brand asset to use as a fallback
@@ -40,7 +40,7 @@ async function startServer() {
       return { base64: cachedLogoBase64, type: cachedLogoType };
     }
 
-    // Prefer a local PNG for email embeds to use the actual company logo file.
+    // Prefer a local PNG for CID/email clients, then fall back to SVG if PNG is unavailable.
     try {
       const localPngPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.png');
       if (fs.existsSync(localPngPath)) {
@@ -150,44 +150,29 @@ async function startServer() {
           continue;
         }
 
-        // Clean output HTML body and replace relative logo paths with a CID attachment reference
+        // Clean output HTML body to replace relative paths with hosted logo URL
         let emailHtml = msg.body;
-        const possibleLocalUrls = [
+        const possibleUrls = [
+          'https://encorefinancials.com/assets/images/application-settings/logo-dark.png',
+          'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
           '/assets/img/logo.png',
           '/assets/img/logo.svg',
           'logo.png',
           'logo.svg'
         ];
-        let logoData: { base64: string; type: string } | null = null;
-        let useAttachment = false;
-
-        for (const url of possibleLocalUrls) {
+        
+        for (const url of possibleUrls) {
           if (emailHtml.includes(url)) {
-            if (!logoData) {
-              logoData = await getLogoAsBase64();
-            }
-            emailHtml = emailHtml.split(url).join('cid:logo');
-            useAttachment = true;
+            emailHtml = emailHtml.split(url).join('https://encorefinancials.com/assets/images/application-settings/logo-dark.png');
           }
         }
 
-        const messagePayload: any = {
+        validMessages.push({
           to: recipient,
           subject: msg.subject,
           htmlBody: emailHtml,
           originalTo: msg.to
-        };
-
-        if (useAttachment && logoData) {
-          messagePayload.attachments = [{
-            filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
-            content: logoData.base64,
-            contentType: logoData.type,
-            contentId: 'logo'
-          }];
-        }
-
-        validMessages.push(messagePayload);
+        });
       }
 
       // If no valid messages left to send, return immediately
@@ -206,8 +191,7 @@ async function startServer() {
               from: 'Encore <no-reply@encorefinancials.com>',
               to: msg.to,
               subject: msg.subject,
-            html: msg.htmlBody,
-            attachments: msg.attachments
+              html: msg.htmlBody
             });
 
             if (individualRes && individualRes.error) {
@@ -240,42 +224,34 @@ async function startServer() {
       };
 
       try {
-        const hasAttachments = validMessages.some(msg => Array.isArray(msg.attachments) && msg.attachments.length > 0);
+        console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
 
-        if (hasAttachments) {
-          console.log(`[send-blast] Sending ${validMessages.length} individual message(s) with inline attachments...`);
+        const batchPayload = validMessages.map(msg => ({
+          from: 'Encore <no-reply@encorefinancials.com>',
+          to: msg.to,
+          subject: msg.subject,
+          html: msg.htmlBody
+        }));
+
+        const batchResult = await activeResend.batch.send(batchPayload);
+
+        if (batchResult && batchResult.error) {
+          console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
           const fallbackResults = await sendIndividualFallback(validMessages);
           results.push(...fallbackResults);
         } else {
-          console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
-
-          const batchPayload = validMessages.map(msg => ({
-            from: 'Encore <no-reply@encorefinancials.com>',
-            to: msg.to,
-            subject: msg.subject,
-            html: msg.htmlBody
-          }));
-
-          const batchResult = await activeResend.batch.send(batchPayload);
-
-          if (batchResult && batchResult.error) {
-            console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
-            const fallbackResults = await sendIndividualFallback(validMessages);
-            results.push(...fallbackResults);
-          } else {
-            // Success! Process each response item mapping 1-to-1
-            const batchData = batchResult?.data || [];
-            validMessages.forEach((msg, idx) => {
-              const dataItem = batchData[idx];
-              results.push({
-                to: msg.originalTo,
-                success: true,
-                id: dataItem?.id || null,
-                error: null
-              });
+          // Success! Process each response item mapping 1-to-1
+          const batchData = batchResult?.data || [];
+          validMessages.forEach((msg, idx) => {
+            const dataItem = batchData[idx];
+            results.push({
+              to: msg.originalTo,
+              success: true,
+              id: dataItem?.id || null,
+              error: null
             });
-            console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
-          }
+          });
+          console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
         }
       } catch (batchException: any) {
         console.warn(`Resend Batch API crashed during request, activating individual fallback:`, batchException);
