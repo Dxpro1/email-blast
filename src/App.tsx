@@ -639,7 +639,7 @@ export default function App() {
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); background-color: #ffffff;">
           <!-- Corporate Branding Header -->
           <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #f1f5f9;">
-            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+            <img src="/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Celebration Banner -->
@@ -689,7 +689,7 @@ export default function App() {
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #ffffff;">
         <!-- Corporate Branding Header -->
         <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 3px solid #102CA4;">
-          <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+          <img src="/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
         </div>
         <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
           <div style="white-space: pre-wrap; font-size: 15px; color: #1f2937;">${bodyText}</div>
