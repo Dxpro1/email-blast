@@ -1068,7 +1068,7 @@ export default function App() {
         };
       });
       
-      const batchSize = 10;
+      const batchSize = 100;
       const totalBatches = Math.ceil(messages.length / batchSize);
       const delayBetweenBatches = 1000;
       
@@ -1108,7 +1108,21 @@ export default function App() {
             throw new Error(data?.error || `Failed to send batch ${batchNum}`);
           }
           
-          successCountAccumulator += currentBatch.length;
+          if (data && Array.isArray(data.results)) {
+            data.results.forEach((res: any, index: number) => {
+              const contactObj = currentContactsBatch[index];
+              if (res.success) {
+                successCountAccumulator += 1;
+              } else {
+                console.error(`Email to ${contactObj?.email} failed to send:`, res.error);
+                if (contactObj) {
+                  failedContactsAccumulator.push(contactObj);
+                }
+              }
+            });
+          } else {
+            successCountAccumulator += currentBatch.length;
+          }
         } catch (err: any) {
           console.error(`Batch ${batchNum} failed:`, err);
           failedContactsAccumulator = [...failedContactsAccumulator, ...currentContactsBatch];

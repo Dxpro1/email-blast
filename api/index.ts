@@ -117,61 +117,137 @@ router.post('/send-blast', async (req, res) => {
   }
 
   try {
-    const logoData = await getLogoAsBase64();
-    const results = [];
-    
+    const results: any[] = [];
+    const validMessages: any[] = [];
+
+    // 1. Process, validate, and sanitize each message
     for (const msg of messages) {
+      let recipient = '';
+      if (Array.isArray(msg.to)) {
+        recipient = typeof msg.to[0] === 'string' ? msg.to[0].trim() : '';
+      } else if (typeof msg.to === 'string') {
+        recipient = msg.to.trim();
+      }
+
+      // Clean email format regex validation
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!recipient || !emailRegex.test(recipient)) {
+        console.warn(`[send-blast] Skipping invalid email address: ${recipient || 'empty'}`);
+        results.push({
+          to: msg.to || recipient,
+          success: false,
+          id: null,
+          error: 'Invalid or empty email address format'
+        });
+        continue;
+      }
+
+      // Clean output HTML body to replace relative paths with hosted logo URL
       let emailHtml = msg.body;
-      const attachments: any[] = [];
-      let hasAttachment = false;
+      const possibleUrls = [
+        'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+        '/assets/img/logo.png',
+        '/assets/img/logo.svg',
+        'logo.png',
+        'logo.svg'
+      ];
       
-      if (logoData) {
-        const possibleUrls = [
-          'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
-          '/assets/img/logo.png',
-          '/assets/img/logo.svg',
-          'logo.png',
-          'logo.svg'
-        ];
-        
-        let matched = false;
-        for (const url of possibleUrls) {
-          if (emailHtml.includes(url)) {
-            emailHtml = emailHtml.split(url).join('cid:logo');
-            matched = true;
-          }
-        }
-        
-        if (matched) {
-          attachments.push({
-            filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
-            content: logoData.base64,
-            contentId: 'logo',
-            contentType: logoData.type || 'image/svg+xml'
-          });
-          hasAttachment = true;
-          console.log(`[send-blast] Replaced logo URL with cid:logo for recipient: ${msg.to}`);
+      for (const url of possibleUrls) {
+        if (emailHtml.includes(url)) {
+          emailHtml = emailHtml.split(url).join('https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png');
         }
       }
 
-      const msgPayload: any = {
+      validMessages.push({
+        to: recipient,
+        subject: msg.subject,
+        htmlBody: emailHtml,
+        originalTo: msg.to
+      });
+    }
+
+    // If no valid messages left to send, return immediately
+    if (validMessages.length === 0) {
+      return res.json({ results });
+    }
+
+    // Helper function for individual fallback if batch endpoint raises unexpected exceptions
+    const sendIndividualFallback = async (messagesList: any[]) => {
+      const fallbackResults = [];
+      for (const msg of messagesList) {
+        try {
+          // Apply a small sleep of 150ms to strictly avoid any rate limits of single sending
+          await new Promise(resolve => setTimeout(resolve, 150));
+          const individualRes = await activeResend.emails.send({
+            from: 'Encore <no-reply@encorefinancials.com>',
+            to: msg.to,
+            subject: msg.subject,
+            html: msg.htmlBody
+          });
+
+          if (individualRes && individualRes.error) {
+            console.error(`Resend returned error in individual fallback for ${msg.to}:`, individualRes.error);
+            fallbackResults.push({
+              to: msg.originalTo,
+              success: false,
+              id: null,
+              error: individualRes.error.message || 'Unknown Resend error'
+            });
+          } else {
+            fallbackResults.push({
+              to: msg.originalTo,
+              success: true,
+              id: individualRes?.data?.id || (individualRes as any)?.id || null,
+              error: null
+            });
+          }
+        } catch (individualErr: any) {
+          console.error(`Exception during individual fallback for ${msg.to}:`, individualErr);
+          fallbackResults.push({
+            to: msg.originalTo,
+            success: false,
+            id: null,
+            error: individualErr.message || String(individualErr)
+          });
+        }
+      }
+      return fallbackResults;
+    };
+
+    try {
+      console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
+
+      const batchPayload = validMessages.map(msg => ({
         from: 'Encore <no-reply@encorefinancials.com>',
         to: msg.to,
         subject: msg.subject,
-        html: emailHtml,
-      };
+        html: msg.htmlBody
+      }));
 
-      if (attachments.length > 0) {
-        msgPayload.attachments = attachments;
-        console.log(`[send-blast] Sending email with ${attachments.length} attachment(s) to ${msg.to}`);
+      const batchResult = await activeResend.batch.send(batchPayload);
+
+      if (batchResult && batchResult.error) {
+        console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
+        const fallbackResults = await sendIndividualFallback(validMessages);
+        results.push(...fallbackResults);
+      } else {
+        // Success! Process each response item mapping 1-to-1
+        const batchData = batchResult?.data || [];
+        validMessages.forEach((msg, idx) => {
+          const dataItem = batchData[idx];
+          results.push({
+            to: msg.originalTo,
+            success: true,
+            id: dataItem?.id || null,
+            error: null
+          });
+        });
+        console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
       }
-
-      // Resend batch API doesn't support attachments, so send individual emails when attachments present
-      const result = hasAttachment 
-        ? await activeResend.emails.send(msgPayload)
-        : await activeResend.emails.send(msgPayload);
-      
-      results.push(result);
+    } catch (batchException: any) {
+      console.warn(`Resend Batch API crashed during request, activating individual fallback:`, batchException);
+      const fallbackResults = await sendIndividualFallback(validMessages);
+      results.push(...fallbackResults);
     }
 
     res.json({ results });
