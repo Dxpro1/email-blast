@@ -1074,6 +1074,7 @@ export default function App() {
       
       let failedContactsAccumulator: Contact[] = [];
       let successCountAccumulator = 0;
+      const finalizedContacts: Contact[] = [];
 
       let toastId: string | number | undefined;
       if (messages.length > batchSize) {
@@ -1111,21 +1112,45 @@ export default function App() {
           if (data && Array.isArray(data.results)) {
             data.results.forEach((res: any, index: number) => {
               const contactObj = currentContactsBatch[index];
+              if (!contactObj) return;
               if (res.success) {
                 successCountAccumulator += 1;
+                finalizedContacts.push({
+                  ...contactObj,
+                  status: 'success'
+                });
               } else {
-                console.error(`Email to ${contactObj?.email} failed to send:`, res.error);
-                if (contactObj) {
-                  failedContactsAccumulator.push(contactObj);
-                }
+                console.error(`Email to ${contactObj.email} failed to send:`, res.error);
+                const failedContact = {
+                  ...contactObj,
+                  status: 'failed',
+                  error: res.error || 'Failed to send'
+                };
+                failedContactsAccumulator.push(failedContact);
+                finalizedContacts.push(failedContact);
               }
             });
           } else {
             successCountAccumulator += currentBatch.length;
+            currentContactsBatch.forEach(contactObj => {
+              finalizedContacts.push({
+                ...contactObj,
+                status: 'success'
+              });
+            });
           }
         } catch (err: any) {
           console.error(`Batch ${batchNum} failed:`, err);
-          failedContactsAccumulator = [...failedContactsAccumulator, ...currentContactsBatch];
+          const errorMsg = err.message || 'Batch request failed';
+          currentContactsBatch.forEach(contactObj => {
+            const failedContact = {
+              ...contactObj,
+              status: 'failed',
+              error: errorMsg
+            };
+            failedContactsAccumulator.push(failedContact);
+            finalizedContacts.push(failedContact);
+          });
         }
         
         if (i + batchSize < messages.length) {
@@ -1135,7 +1160,9 @@ export default function App() {
       
       if (toastId) toast.dismiss(toastId);
 
-      const finalStatus = failedContactsAccumulator.length === 0 ? 'completed' : 'partial_error';
+      const computedCampaignStatus = failedContactsAccumulator.length === 0 
+        ? ('success' as const) 
+        : (successCountAccumulator === 0 ? ('failed' as const) : ('partial' as const));
 
       // Save to Firestore History
       const historyItem = {
@@ -1143,12 +1170,12 @@ export default function App() {
         subject,
         body,
         recipientCount: contacts.length,
-        status: finalStatus === 'completed' ? 'success' as const : 'partial' as const,
+        status: computedCampaignStatus,
         successCount: successCountAccumulator,
         failedCount: failedContactsAccumulator.length,
         failedContacts: failedContactsAccumulator,
         recipients: contacts.map(c => ({ email: c.email, name: c.name })),
-        rawContacts: contacts,
+        rawContacts: finalizedContacts,
         createdAt: new Date().toISOString()
       };
 
@@ -2639,11 +2666,45 @@ export default function App() {
                 </div>
                 
                 <div className="space-y-2">
-                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Recipient Details</p>
-                  <p className="text-sm font-medium p-3 bg-gray-50 rounded-lg border border-gray-100 flex items-center gap-2">
-                     <span className="font-semibold">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].email}</span>
-                     <span className="text-gray-500">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].name ? `(${selectedHistory.rawContacts[selectedHistoryRecipientIndex].name})` : ''}</span>
-                  </p>
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Recipient Details</p>
+                    {(() => {
+                      const rc = selectedHistory.rawContacts[selectedHistoryRecipientIndex];
+                      if (rc.status === 'success') {
+                        return (
+                          <Badge className="bg-green-50 text-green-700 border-green-200 text-[10px] py-0 px-2 h-5">
+                            <CheckCircle2 className="w-3.5 h-3.5 mr-1 shrink-0" />
+                            Success
+                          </Badge>
+                        );
+                      } else if (rc.status === 'failed') {
+                        return (
+                          <Badge className="bg-red-50 text-red-700 border-red-200 text-[10px] py-0 px-2 h-5">
+                            <AlertTriangle className="w-3.5 h-3.5 mr-1 shrink-0" />
+                            Failed
+                          </Badge>
+                        );
+                      }
+                      return null;
+                    })()}
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-2">
+                    <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
+                       <span className="font-semibold">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].email}</span>
+                       <span className="text-gray-500">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].name ? `(${selectedHistory.rawContacts[selectedHistoryRecipientIndex].name})` : ''}</span>
+                    </p>
+                    {selectedHistory.rawContacts[selectedHistoryRecipientIndex].error && (
+                      <div className="text-xs bg-red-50/50 text-red-800 p-2.5 rounded border border-red-100 flex items-start gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-650 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-medium">Error details:</span>{' '}
+                          <code className="font-mono text-[11px] block mt-1 break-all select-all">
+                            {selectedHistory.rawContacts[selectedHistoryRecipientIndex].error}
+                          </code>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Subject</p>

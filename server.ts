@@ -244,12 +244,21 @@ async function startServer() {
           const batchData = batchResult?.data || [];
           validMessages.forEach((msg, idx) => {
             const dataItem = batchData[idx];
-            results.push({
-              to: msg.originalTo,
-              success: true,
-              id: dataItem?.id || null,
-              error: null
-            });
+            if (dataItem && dataItem.error) {
+              results.push({
+                to: msg.originalTo,
+                success: false,
+                id: null,
+                error: dataItem.error.message || 'Unknown batch item sending error'
+              });
+            } else {
+              results.push({
+                to: msg.originalTo,
+                success: true,
+                id: dataItem?.id || null,
+                error: null
+              });
+            }
           });
           console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
         }
