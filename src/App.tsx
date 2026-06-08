@@ -16,10 +16,20 @@ import {
   Info,
   LogOut,
   User as UserIcon,
-  RefreshCw
+  RefreshCw,
+  AlertTriangle,
+  Search,
+  LayoutDashboard,
+  TrendingUp,
+  Clock,
+  Shield,
+  Lock,
+  UserPlus,
+  UserCheck
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -49,7 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { auth, db, signInWithGoogle, signInWithEmailAndPassword, createUserWithEmailAndPassword, checkConnection } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs, where } from 'firebase/firestore';
 
 // Initialize Gemini is handled server-side to protect keys and prevent browser environment crashes
 
@@ -88,6 +98,16 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   toast.error("Database error. Please try again.");
 }
 
+interface AppUser {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  role: 'super_admin' | 'user';
+  status: 'active' | 'pending' | 'inactive';
+  createdAt?: any;
+}
+
 interface Contact {
   id: string;
   email: string;
@@ -103,6 +123,11 @@ interface BlastHistory {
   body: string;
   recipientCount: number;
   status: 'success' | 'failed' | 'partial';
+  successCount?: number;
+  failedCount?: number;
+  failedContacts?: Contact[];
+  recipients?: Array<{ email: string; name?: string }>;
+  rawContacts?: Contact[];
 }
 
 const TEMPLATES = [
@@ -150,6 +175,13 @@ Should you have any clarification, you may call or text (044) 940-5625 or 0919-0
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [userProfile, setUserProfile] = useState<AppUser | null>(null);
+  const [checkingProfile, setCheckingProfile] = useState(true);
+  const [allUsers, setAllUsers] = useState<AppUser[]>([]);
+  const [loadingAllUsers, setLoadingAllUsers] = useState(false);
+  const [newTeamEmail, setNewTeamEmail] = useState('');
+  const [newTeamName, setNewTeamName] = useState('');
+  const [userSearchQuery, setUserSearchQuery] = useState('');
   const [dbConnected, setDbConnected] = useState<boolean | null>(null);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -158,17 +190,44 @@ export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [newEmail, setNewEmail] = useState('');
   const [newName, setNewName] = useState('');
+  const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [history, setHistory] = useState<BlastHistory[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<BlastHistory | null>(null);
+  const [selectedHistoryRecipientIndex, setSelectedHistoryRecipientIndex] = useState<number>(0);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState('compose');
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [configStatus, setConfigStatus] = useState<{ hasResendKey: boolean; hasGeminiKey: boolean } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [importedFileName, setImportedFileName] = useState('');
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
+  const [csvData, setCsvData] = useState<any[]>([]);
+  const [csvMapping, setCsvMapping] = useState<Record<string, string>>({});
+
+  const dashboardStats = useMemo(() => {
+    let totalSent = 0;
+    let totalFailed = 0;
+    history.forEach(item => {
+      totalSent += item.successCount ?? (item.status === 'success' || !item.status ? item.recipientCount : 0);
+      totalFailed += item.failedCount ?? (item.status === 'failed' ? item.recipientCount : 0);
+    });
+    const totalAttempted = totalSent + totalFailed;
+    const successRate = totalAttempted > 0 ? Math.round((totalSent / totalAttempted) * 100) : 100;
+    
+    return {
+      totalSent,
+      totalFailed,
+      totalAttempted,
+      successRate,
+      campaignsCount: history.length,
+      currentRecipientsCount: contacts.length
+    };
+  }, [history, contacts]);
 
   const saveLocalContacts = (list: Contact[]) => {
     if (user) {
@@ -214,25 +273,129 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Auth State Listener
+  // Auth State and User Access Profile Listener
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setAuthLoading(false);
       
-      if (u && dbConnected === true) {
-        // Save user profile if new (only if connected to prevent offline error during init check)
-        setDoc(doc(db, 'users', u.uid), {
-          uid: u.uid,
-          email: u.email,
-          displayName: u.displayName,
-          photoURL: u.photoURL,
-          updatedAt: serverTimestamp()
-        }, { merge: true }).catch(err => {
-          console.warn("Skipping Firestore user-profile save (running in offline/local fallback mode):", err);
-        });
+      if (!u) {
+        setUserProfile(null);
+        setCheckingProfile(false);
+        setAuthLoading(false);
+        return;
       }
+
+      setCheckingProfile(true);
+
+      const isBootstrappedAdmin = u.email?.toLowerCase() === 'encorefinancials@gmail.com';
+      const userDocRef = doc(db, 'users', u.uid);
+
+      if (dbConnected === false) {
+        // Offline / cached fallback
+        const cached = localStorage.getItem(`encore_profile_${u.uid}`);
+        if (cached) {
+          try {
+            setUserProfile(JSON.parse(cached));
+          } catch (_) {}
+        } else {
+          setUserProfile({
+            uid: u.uid,
+            email: u.email,
+            displayName: u.displayName || 'Team Member',
+            photoURL: u.photoURL || '',
+            role: isBootstrappedAdmin ? 'super_admin' : 'user',
+            status: isBootstrappedAdmin ? 'active' : 'pending'
+          });
+        }
+        setCheckingProfile(false);
+        setAuthLoading(false);
+        return;
+      }
+
+      // Realtime listener for the user profile
+      const unsubProfile = onSnapshot(userDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const profile: AppUser = {
+            uid: u.uid,
+            email: u.email || data.email,
+            displayName: u.displayName || data.displayName,
+            photoURL: u.photoURL || data.photoURL,
+            role: data.role || (isBootstrappedAdmin ? 'super_admin' : 'user'),
+            status: data.status || (isBootstrappedAdmin ? 'active' : 'pending'),
+            createdAt: data.createdAt
+          };
+          setUserProfile(profile);
+          localStorage.setItem(`encore_profile_${u.uid}`, JSON.stringify(profile));
+          
+          // Auto-update super_admin role for bootstrapped admin if not set
+          if (isBootstrappedAdmin && (data.role !== 'super_admin' || data.status !== 'active')) {
+            setDoc(userDocRef, { role: 'super_admin', status: 'active' }, { merge: true }).catch(console.error);
+          }
+          setCheckingProfile(false);
+          setAuthLoading(false);
+        } else {
+          // Document doesn't exist yet. Check if whitelisted by email.
+          const q = query(collection(db, 'users'), where('email', '==', u.email));
+          getDocs(q).then((snap) => {
+            let whitelistedDoc: any = null;
+            let tempDocId: string | null = null;
+            snap.forEach((doc) => {
+              if (!doc.data().uid) {
+                whitelistedDoc = doc.data();
+                tempDocId = doc.id;
+              }
+            });
+
+            const initialProfile: AppUser = {
+              uid: u.uid,
+              email: u.email,
+              displayName: u.displayName || whitelistedDoc?.displayName || 'Team Member',
+              photoURL: u.photoURL || '',
+              role: whitelistedDoc?.role || (isBootstrappedAdmin ? 'super_admin' : 'user'),
+              status: whitelistedDoc?.status || (isBootstrappedAdmin ? 'active' : 'pending'),
+            };
+
+            setDoc(userDocRef, {
+              ...initialProfile,
+              createdAt: whitelistedDoc?.createdAt || serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }, { merge: true })
+            .then(() => {
+              if (tempDocId) {
+                deleteDoc(doc(db, 'users', tempDocId)).catch(console.error);
+              }
+            })
+            .catch((err) => {
+              console.error("Error writing user profile:", err);
+            });
+          }).catch((err) => {
+            console.error("Error querying email whitelist:", err);
+            // Fallback: create fresh document
+            const initialProfile: AppUser = {
+              uid: u.uid,
+              email: u.email,
+              displayName: u.displayName || 'Team Member',
+              photoURL: u.photoURL || '',
+              role: isBootstrappedAdmin ? 'super_admin' : 'user',
+              status: isBootstrappedAdmin ? 'active' : 'pending',
+            };
+            setDoc(userDocRef, {
+              ...initialProfile,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            }, { merge: true }).catch(console.error);
+          });
+        }
+      }, (err) => {
+        console.error("Error listening to user profile snapshots:", err);
+        setCheckingProfile(false);
+        setAuthLoading(false);
+      });
+
+      return () => unsubProfile();
     });
+
     return () => unsubscribe();
   }, [dbConnected]);
 
@@ -246,7 +409,7 @@ export default function App() {
 
   // Firestore Listeners & Local Fallback
   useEffect(() => {
-    if (!user) {
+    if (!user || userProfile?.status !== 'active') {
       setContacts([]);
       setHistory([]);
       return;
@@ -301,7 +464,41 @@ export default function App() {
       unsubContacts();
       unsubHistory();
     };
-  }, [user, dbConnected]);
+  }, [user, dbConnected, userProfile]);
+
+  // Super Admin: Live list of all portal users
+  useEffect(() => {
+    if (!user || userProfile?.role !== 'super_admin' || dbConnected !== true) {
+      setAllUsers([]);
+      return;
+    }
+
+    setLoadingAllUsers(true);
+    const usersCollectionRef = collection(db, 'users');
+    const qUsers = query(usersCollectionRef, orderBy('createdAt', 'desc'));
+    
+    const unsubscribe = onSnapshot(qUsers, (snapshot) => {
+      const list = snapshot.docs.map(doc => {
+        const data = doc.data();
+        return { 
+          uid: doc.id,
+          email: data.email || null,
+          displayName: data.displayName || null,
+          photoURL: data.photoURL || null,
+          role: data.role || 'user',
+          status: data.status || 'pending',
+          createdAt: data.createdAt
+        } as AppUser;
+      });
+      setAllUsers(list);
+      setLoadingAllUsers(false);
+    }, (error) => {
+      console.warn("Error listening to all users (offline warning or rules delay):", error);
+      setLoadingAllUsers(false);
+    });
+
+    return () => unsubscribe();
+  }, [user, userProfile, dbConnected]);
 
   const handleTemplateSelect = (templateId: string) => {
     const template = TEMPLATES.find(t => t.id === templateId);
@@ -312,154 +509,263 @@ export default function App() {
     }
   };
 
-  const handleCsvImport = async () => {
-    if (!csvFile || !user) return;
+  // Super Admin: access control and searching filters
+  const filteredUsers = useMemo(() => {
+    return allUsers.filter(u => {
+      const q = userSearchQuery.toLowerCase();
+      return (
+        u.email?.toLowerCase().includes(q) ||
+        u.displayName?.toLowerCase().includes(q) ||
+        u.role?.toLowerCase().includes(q) ||
+        u.status?.toLowerCase().includes(q)
+      );
+    });
+  }, [allUsers, userSearchQuery]);
+
+  const handleToggleUserStatus = async (targetUser: AppUser) => {
+    if (targetUser.uid === user?.uid) {
+      toast.error("You cannot disable your own Super Admin access.");
+      return;
+    }
+    const nextStatus = targetUser.status === 'active' ? 'inactive' : 'active';
+    try {
+      await setDoc(doc(db, 'users', targetUser.uid), {
+        status: nextStatus,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      toast.success(`Access updated: ${targetUser.email} is now ${nextStatus === 'active' ? 'ACTIVE' : 'SUSPENDED'}`);
+    } catch (err) {
+      console.error("Error setting user status:", err);
+      toast.error("Failed to update user status");
+    }
+  };
+
+  const handleAddTeamMemberByEmail = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTeamEmail) {
+      toast.error("Please enter a valid email address.");
+      return;
+    }
+    const emailLower = newTeamEmail.trim().toLowerCase();
     
-    Papa.parse(csvFile, {
+    // Check if user is already present in our loaded collection
+    if (allUsers.some(u => u.email?.toLowerCase() === emailLower)) {
+      toast.error("This email address is already registered or whitelisted.");
+      return;
+    }
+
+    try {
+      // Create a temporary document labeled with 'invite_random'
+      const userDocName = `invite_${Math.random().toString(36).substring(2, 11)}`;
+      await setDoc(doc(db, 'users', userDocName), {
+        email: emailLower,
+        displayName: newTeamName.trim() || 'Team Member',
+        status: 'active',
+        role: 'user',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      toast.success(`${emailLower} has been whitelisted and pre-approved!`);
+      setNewTeamEmail('');
+      setNewTeamName('');
+    } catch (err) {
+      console.error("Error writing whitelist document:", err);
+      toast.error("Failed to whitelist email.");
+    }
+  };
+
+  const handleDeleteUserRecord = async (targetUser: AppUser) => {
+    if (targetUser.uid === user?.uid) {
+      toast.error("You cannot delete your own Super Admin access.");
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to completely delete and revoke portal access for ${targetUser.email || targetUser.displayName}?`)) {
+      return;
+    }
+    try {
+      await deleteDoc(doc(db, 'users', targetUser.uid));
+      toast.success("User access deleted successfully.");
+    } catch (err) {
+      console.error("Error deleting user doc:", err);
+      toast.error("Failed to delete user profile.");
+    }
+  };
+
+  const formatToLongDate = (dateStr: string) => {
+    if (!dateStr) return dateStr;
+    // Replace hyphens with slashes to ensure it parses neutrally in the local timezone 
+    // instead of defaulting to UTC midnight and shifting the day back
+    const normalizedDateStr = dateStr.replace(/-/g, '/');
+    const parsed = new Date(normalizedDateStr);
+    if (isNaN(parsed.getTime())) return dateStr;
+    return parsed.toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCsvFile(file);
+
+    Papa.parse(file, {
       header: true,
       skipEmptyLines: true,
-      complete: async (results) => {
-        const batch: Contact[] = results.data.map((row: any) => {
-          let email = '';
-          let name = '';
-          let firstname = '';
-          let yearmodel = '';
-          let unit = '';
-          let plate = '';
-          let expiry = '';
-          let amount = '';
-          let ddate = '';
-          let periodicins = '';
+      complete: (results) => {
+        const fields = results.meta.fields || [];
+        setCsvHeaders(fields);
+        setCsvData(results.data);
+        
+        const initialMapping: Record<string, string> = {
+          email: '', name: '', firstname: '', yearmodel: '', 
+          unit: '', plate: '', expiry: '', amount: '', 
+          ddate: '', periodicins: ''
+        };
 
-          // Tolerance-based parsing: scan all headers (keys) in the CSV row
-          Object.keys(row).forEach(k => {
-            const val = typeof row[k] === 'string' ? row[k].trim() : String(row[k] || '').trim();
-            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-            // 1. Email check
-            if (cleanK.includes('email') || cleanK.includes('emailaddress')) {
-              if (val) email = val;
-            } else if ((cleanK === 'to' || cleanK === 'recipient' || cleanK === 'contact') && !email) {
-              if (val) email = val;
-            }
-
-            // 2. Name check
-            if (cleanK.includes('firstname') || cleanK.includes('first') || cleanK.includes('givenname') || cleanK.includes('given')) {
-              if (val) firstname = val;
-            } else if (cleanK.includes('name')) {
-              if (val) name = val;
-            }
-
-            // 3. Year Model check
-            if (cleanK.includes('yearmodel')) {
-              if (val) yearmodel = val;
-            } else if ((cleanK.includes('model') || cleanK.includes('year')) && !yearmodel) {
-              if (val) yearmodel = val;
-            }
-
-            // 4. Unit check
-            if (cleanK.includes('unit') || cleanK.includes('vehicle') || cleanK.includes('car')) {
-              if (val) unit = val;
-            }
-
-            // 5. Plate check
-            if (cleanK.includes('plate')) {
-              if (val) plate = val;
-            }
-
-            // 6. Expiry check
-            if (cleanK.includes('expiry') || cleanK.includes('expire') || cleanK.includes('expiration')) {
-              if (val) expiry = val;
-            }
-
-            // 7. Amount check
-            if (cleanK.includes('amount') || cleanK.includes('premium')) {
-              if (val) amount = val;
-            }
-
-            // 8. Due Date check
-            if (cleanK.includes('duedate') || cleanK.includes('ddate') || cleanK.includes('due') || cleanK.includes('date')) {
-              if (!cleanK.includes('expiry') && !cleanK.includes('expire') && !cleanK.includes('expiration')) {
-                if (val) ddate = val;
-              }
-            }
-
-            // 9. Periodic Insurance check
-            if (cleanK.includes('periodicins') || cleanK.includes('amortization') || cleanK.includes('periodic')) {
-              if (val) periodicins = val;
-            }
-          });
-
-          // Consolidate name and firstname values
-          if (!firstname && name) {
-            firstname = name;
+        fields.forEach(f => {
+          const cleanF = f.toLowerCase().replace(/[^a-z0-9]/g, '');
+          
+          if (!initialMapping.email && (cleanF.includes('email') || cleanF.includes('emailaddress') || cleanF === 'to' || cleanF === 'recipient' || cleanF === 'contact')) {
+             initialMapping.email = f;
           }
-          if (!name && firstname) {
-            name = firstname;
+          if (!initialMapping.firstname && (cleanF.includes('firstname') || cleanF.includes('first') || cleanF.includes('givenname') || cleanF.includes('given'))) {
+             initialMapping.firstname = f;
           }
-          if (!name) name = 'Unnamed';
-          if (!firstname) firstname = 'Unnamed';
+          if (!initialMapping.name && (cleanF.includes('name') && !cleanF.includes('first'))) {
+             initialMapping.name = f;
+          }
+          if (!initialMapping.yearmodel && (cleanF.includes('yearmodel') || cleanF.includes('model') || cleanF.includes('year'))) {
+             initialMapping.yearmodel = f;
+          }
+          if (!initialMapping.unit && (cleanF.includes('unit') || cleanF.includes('vehicle') || cleanF.includes('car'))) {
+             initialMapping.unit = f;
+          }
+          if (!initialMapping.plate && cleanF.includes('plate')) {
+             initialMapping.plate = f;
+          }
+          if (!initialMapping.expiry && (cleanF.includes('expiry') || cleanF.includes('expire') || cleanF.includes('expiration'))) {
+             initialMapping.expiry = f;
+          }
+          if (!initialMapping.amount && (cleanF.includes('amount') || cleanF.includes('premium') || cleanF.includes('check') || (cleanF.includes('payment') && !cleanF.includes('date')))) {
+             initialMapping.amount = f;
+          }
+          if (!initialMapping.ddate && (cleanF.includes('duedate') || cleanF.includes('ddate') || cleanF.includes('due') || cleanF.includes('date') || cleanF.includes('birthday'))) {
+             if (!cleanF.includes('expiry') && !cleanF.includes('expire') && !cleanF.includes('expiration')) {
+               initialMapping.ddate = f;
+             }
+          }
+          if (!initialMapping.periodicins && (cleanF.includes('periodicins') || cleanF.includes('amortization') || cleanF.includes('periodic') || cleanF.includes('installment'))) {
+             initialMapping.periodicins = f;
+          }
+        });
 
-          // Build a normalized contact record
-          const normalizedContact: any = {
-            email: email.trim(),
-            name: name.trim(),
-            firstname: firstname.trim(),
-            createdAt: new Date().toISOString()
-          };
+        setCsvMapping(initialMapping);
+      }
+    });
+  };
 
-          if (yearmodel) normalizedContact.yearmodel = yearmodel.trim();
-          if (unit) normalizedContact.unit = unit.trim();
-          if (plate) normalizedContact.plate = plate.trim();
-          if (expiry) normalizedContact.expiry = expiry.trim();
-          if (amount) normalizedContact.amount = amount.trim();
-          if (ddate) normalizedContact.ddate = ddate.trim();
-          if (periodicins) normalizedContact.periodicins = periodicins.trim();
+  const handleCsvImport = async () => {
+    if (!csvFile || !user || csvData.length === 0) return;
+    
+    if (!csvMapping.email) {
+      toast.error('❌ Missing Email Mapping: Please map a column to Email.', { duration: 8000 });
+      return;
+    }
 
-          // Merge all original attributes and their lowercase cleaned variants to survive placeholder substitution
-          Object.keys(row).forEach(k => {
-            const val = typeof row[k] === 'string' ? row[k].trim() : String(row[k] || '').trim();
-            const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-            normalizedContact[cleanK] = val;
-            
-            const lowK = k.toLowerCase().replace(/\s+/g, '');
-            normalizedContact[lowK] = val;
-            
-            normalizedContact[k] = val;
-          });
+    const batch: Contact[] = csvData.map((row: any) => {
+      let email = csvMapping.email ? String(row[csvMapping.email] || '').trim() : '';
+      let name = csvMapping.name ? String(row[csvMapping.name] || '').trim() : '';
+      let firstname = csvMapping.firstname ? String(row[csvMapping.firstname] || '').trim() : '';
+      let yearmodel = csvMapping.yearmodel ? String(row[csvMapping.yearmodel] || '').trim() : '';
+      let unit = csvMapping.unit ? String(row[csvMapping.unit] || '').trim() : '';
+      let plate = csvMapping.plate ? String(row[csvMapping.plate] || '').trim() : '';
+      let expiry = csvMapping.expiry ? String(row[csvMapping.expiry] || '').trim() : '';
+      let amount = csvMapping.amount ? String(row[csvMapping.amount] || '').trim() : '';
+      let ddate = csvMapping.ddate ? String(row[csvMapping.ddate] || '').trim() : '';
+      let periodicins = csvMapping.periodicins ? String(row[csvMapping.periodicins] || '').trim() : '';
 
-          return normalizedContact;
-        }).filter((c: any) => c.email && c.email.includes('@'));
+      if (expiry) expiry = formatToLongDate(expiry);
+      if (ddate) ddate = formatToLongDate(ddate);
 
-        if (batch.length === 0) {
-          toast.error('No valid contacts with email addresses found in CSV');
-          return;
+      if (!firstname && name) firstname = name;
+      if (!name && firstname) name = firstname;
+      if (!name) name = 'Unnamed';
+      if (!firstname) firstname = 'Unnamed';
+
+      const normalizedContact: any = {
+        email,
+        name,
+        firstname,
+        createdAt: new Date().toISOString()
+      };
+
+      if (yearmodel) normalizedContact.yearmodel = yearmodel;
+      if (unit) normalizedContact.unit = unit;
+      if (plate) normalizedContact.plate = plate;
+      if (expiry) normalizedContact.expiry = expiry;
+      if (amount) normalizedContact.amount = amount;
+      if (ddate) normalizedContact.ddate = ddate;
+      if (periodicins) normalizedContact.periodicins = periodicins;
+
+      // Merge all original attributes just in case
+      Object.keys(row).forEach(k => {
+        let val = typeof row[k] === 'string' ? row[k].trim() : String(row[k] || '').trim();
+        const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+        
+        if (cleanK.includes('date') || cleanK.includes('birthday') || cleanK.includes('expiry')) {
+           val = formatToLongDate(val);
         }
 
-        // Add to Firestore or state fallback
-        toast.loading(`Importing ${batch.length} contacts...`);
+        normalizedContact[cleanK] = val;
+        
+        const lowK = k.toLowerCase().replace(/\s+/g, '');
+        normalizedContact[lowK] = val;
+        
+        normalizedContact[k] = val;
+      });
+
+      return normalizedContact;
+    }).filter((c: any) => c.email && c.email.includes('@'));
+
+    if (batch.length === 0) {
+      toast.error('No valid contacts with email addresses found in CSV');
+      return;
+    }
+
+    toast.loading(`Clearing existing contacts & importing ${batch.length} new records...`);
+        
         try {
           if (dbConnected === true) {
-            const contactsRef = collection(db, `users/${user.uid}/contacts`);
+            // First clear existing contacts
+            const contactsPath = `users/${user.uid}/contacts`;
+            const snapshot = await getDocs(collection(db, contactsPath));
+            for (const d of snapshot.docs) {
+              await deleteDoc(d.ref);
+            }
+            
+            // Then add new ones
+            const contactsRef = collection(db, contactsPath);
             for (const contact of batch) {
               await addDoc(contactsRef, contact);
             }
           } else {
+            // Local fallback
             const localBatch = batch.map(c => ({
               id: Math.random().toString(36).substring(2, 11),
               ...c
             }));
-            const updated = [...contacts];
-            localBatch.forEach(c => {
-              if (!updated.some(uc => uc.email === c.email)) {
-                updated.push(c);
-              }
-            });
-            saveLocalContacts(updated);
+            saveLocalContacts(localBatch);
           }
           toast.dismiss();
-          toast.success(`Imported ${batch.length} contacts`);
+          toast.success(`Successfully imported ${batch.length} contacts`);
+          if (csvFile) setImportedFileName(csvFile.name);
           setCsvFile(null);
+          setCsvHeaders([]);
+          setCsvData([]);
+          setCsvMapping({});
           setIsImporting(false);
         } catch (err) {
           console.warn("CSV import to Firestore failed, falling back to local import", err);
@@ -467,20 +773,16 @@ export default function App() {
             id: Math.random().toString(36).substring(2, 11),
             ...c
           }));
-          const updated = [...contacts];
-          localBatch.forEach(c => {
-            if (!updated.some(uc => uc.email === c.email)) {
-              updated.push(c);
-            }
-          });
-          saveLocalContacts(updated);
+          saveLocalContacts(localBatch);
           toast.dismiss();
           toast.success(`Imported ${batch.length} contacts (Local Mode)`);
+          if (csvFile) setImportedFileName(csvFile.name);
           setCsvFile(null);
+          setCsvHeaders([]);
+          setCsvData([]);
+          setCsvMapping({});
           setIsImporting(false);
         }
-      }
-    });
   };
 
   const replacePlaceholders = (text: string, contact: Contact) => {
@@ -556,7 +858,7 @@ export default function App() {
   
   const clearContacts = async () => {
     if (!user) return;
-    if (!confirm('Are you sure you want to clear all contacts?')) return;
+    setIsConfirmClearOpen(false);
     
     try {
       if (dbConnected === true) {
@@ -568,10 +870,12 @@ export default function App() {
       } else {
         saveLocalContacts([]);
       }
+      setImportedFileName('');
       toast.success('All contacts cleared');
     } catch (err) {
       console.warn("Clear in Firestore failed, falling back to local clear", err);
       saveLocalContacts([]);
+      setImportedFileName('');
       toast.success('All contacts cleared (Local Mode)');
     }
   };
@@ -712,6 +1016,26 @@ export default function App() {
     `;
   };
 
+  const extractPlaceholders = (text: string) => {
+    const matches = text.match(/#([a-zA-Z0-9_]+)/g);
+    return matches ? Array.from(new Set(matches.map(m => m.slice(1)))) : [];
+  };
+
+  const getMissingPlaceholders = () => {
+    const requiredPlaceholders = Array.from(new Set([
+      ...extractPlaceholders(subject),
+      ...extractPlaceholders(body)
+    ]));
+
+    if (requiredPlaceholders.length === 0 || contacts.length === 0) return [];
+    
+    return requiredPlaceholders.filter(p => 
+      !contacts.some(c => c[p as keyof Contact] && String(c[p as keyof Contact]).trim() !== '')
+    );
+  };
+
+  const missingPlaceholders = getMissingPlaceholders();
+
   const sendBlast = async () => {
     if (contacts.length === 0) {
       toast.error('No recipients. Please import a CSV file or add contacts manually.');
@@ -722,7 +1046,14 @@ export default function App() {
       return;
     }
 
+    if (missingPlaceholders.length > 0) {
+      if (!confirm(`Warning: The following placeholders in your template do not seem to have any mapped data in your contacts:\n${missingPlaceholders.map(k => '#' + k).join(', ')}\n\nThis could lead to blank values in the sent emails.\nAre you sure you want to proceed?`)) {
+        return;
+      }
+    }
+
     setIsSending(true);
+
     try {
       const messages = contacts.map(contact => {
         const personalizedBody = replacePlaceholders(body, contact);
@@ -736,24 +1067,61 @@ export default function App() {
           body: htmlBody
         };
       });
+      
+      const batchSize = 10;
+      const totalBatches = Math.ceil(messages.length / batchSize);
+      const delayBetweenBatches = 1000;
+      
+      let failedContactsAccumulator: Contact[] = [];
+      let successCountAccumulator = 0;
 
-      const response = await fetch('/api/send-blast', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages })
-      });
-
-      const text = await response.text();
-      let data = {} as any;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { error: text || 'Failed to send' };
+      let toastId: string | number | undefined;
+      if (messages.length > batchSize) {
+         toastId = toast.loading(`Sending batch 1 of ${totalBatches}...`);
       }
 
-      if (!response.ok) {
-        throw new Error(data?.error || 'Failed to send');
+      for (let i = 0; i < messages.length; i += batchSize) {
+        const currentBatch = messages.slice(i, i + batchSize);
+        const currentContactsBatch = contacts.slice(i, i + batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        
+        if (toastId) {
+          toast.loading(`Sending batch ${batchNum} of ${totalBatches}...`, { id: toastId });
+        }
+
+        try {
+          const response = await fetch('/api/send-blast', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: currentBatch })
+          });
+
+          const text = await response.text();
+          let data = {} as any;
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch {
+            data = { error: text || 'Failed to send' };
+          }
+
+          if (!response.ok) {
+            throw new Error(data?.error || `Failed to send batch ${batchNum}`);
+          }
+          
+          successCountAccumulator += currentBatch.length;
+        } catch (err: any) {
+          console.error(`Batch ${batchNum} failed:`, err);
+          failedContactsAccumulator = [...failedContactsAccumulator, ...currentContactsBatch];
+        }
+        
+        if (i + batchSize < messages.length) {
+          await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+        }
       }
+      
+      if (toastId) toast.dismiss(toastId);
+
+      const finalStatus = failedContactsAccumulator.length === 0 ? 'completed' : 'partial_error';
 
       // Save to Firestore History
       const historyItem = {
@@ -761,7 +1129,12 @@ export default function App() {
         subject,
         body,
         recipientCount: contacts.length,
-        status: 'success' as const,
+        status: finalStatus === 'completed' ? 'success' as const : 'partial' as const,
+        successCount: successCountAccumulator,
+        failedCount: failedContactsAccumulator.length,
+        failedContacts: failedContactsAccumulator,
+        recipients: contacts.map(c => ({ email: c.email, name: c.name })),
+        rawContacts: contacts,
         createdAt: new Date().toISOString()
       };
 
@@ -945,18 +1318,92 @@ export default function App() {
               Google Authentication
             </Button>
 
-            <div className="text-center">
-              <button 
-                onClick={() => setIsRegistering(!isRegistering)}
-                className="text-sm text-brand-600 hover:underline font-medium"
-              >
-                {isRegistering ? 'Already have an account? Sign in' : 'First time here? Create an account'}
-              </button>
+            <div className="text-center font-medium text-xs text-gray-500 bg-gray-50/50 p-2.5 rounded-lg border border-gray-100/50">
+              Need access? Sign in with your corporate Google account, or contact your administrator for login credentials.
             </div>
             
             <p className="text-[10px] text-gray-400 text-center">
               Restricted access. Authorized Encore employees only.
             </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (user && checkingProfile) {
+    return (
+      <div className="min-h-screen bg-[#F8F9FA] flex flex-col items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-8 h-8 text-brand-600 animate-spin" />
+          <p className="text-xs text-gray-500 font-medium animate-pulse">Initializing Portal Access...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (user && userProfile && userProfile.status !== 'active') {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
+        >
+          <div className="bg-brand-600 p-8 flex flex-col items-center justify-center text-center">
+            {userProfile.status === 'pending' ? (
+              <Clock className="w-12 h-12 text-white animate-bounce mb-3" />
+            ) : (
+              <AlertTriangle className="w-12 h-12 text-white mb-3 animate-pulse" />
+            )}
+            <h1 className="text-2xl font-bold text-white">
+              {userProfile.status === 'pending' ? 'Approval Pending' : 'Access Suspended'}
+            </h1>
+            <p className="text-brand-100 text-xs mt-1.5 uppercase font-semibold tracking-wider">
+              Encore Leasing & Finance Corp.
+            </p>
+          </div>
+          
+          <div className="p-8 space-y-6">
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                {userProfile.photoURL ? (
+                  <img src={userProfile.photoURL} alt="Profile" className="w-9 h-9 rounded-full" referrerPolicy="no-referrer" />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-brand-100 text-brand-700 flex items-center justify-center font-bold text-sm">
+                    {userProfile.displayName ? userProfile.displayName.charAt(0).toUpperCase() : 'E'}
+                  </div>
+                )}
+                <div>
+                  <p className="font-semibold text-xs text-gray-800">{userProfile.displayName || 'Encore Employee'}</p>
+                  <p className="text-[10px] text-gray-500">{userProfile.email}</p>
+                </div>
+              </div>
+              
+              <div className="border-t border-gray-100 pt-3 text-xs text-gray-600 space-y-2 leading-relaxed">
+                {userProfile.status === 'pending' ? (
+                  <p>
+                    Your account is currently <strong>Pending Administrator Approval</strong>. A Super Administrator (<strong>encorefinancials@gmail.com</strong>) has been notified.
+                  </p>
+                ) : (
+                  <p>
+                    Your account access to the Encore Email Blast system has been <strong>suspended or disabled</strong>. Please contact your manager or the administrator.
+                  </p>
+                )}
+                <p className="text-[11px] text-gray-400 italic">
+                  Once your status is configured by the Super Admin, this page will unlock instantly.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => signOut(auth)}
+              variant="outline"
+              className="w-full h-11 border-gray-200 text-gray-700 hover:bg-gray-50 font-medium transition-all"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign Out / Switch Account
+            </Button>
           </div>
         </motion.div>
       </div>
@@ -1046,6 +1493,10 @@ export default function App() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
           <div className="flex items-center justify-between">
             <TabsList className="bg-white border border-gray-200 p-1 h-12">
+              <TabsTrigger value="dashboard" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
+                <LayoutDashboard className="w-4 h-4 mr-2" />
+                Dashboard
+              </TabsTrigger>
               <TabsTrigger value="compose" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
                 <Send className="w-4 h-4 mr-2" />
                 Compose & Blast
@@ -1058,6 +1509,12 @@ export default function App() {
                 <History className="w-4 h-4 mr-2" />
                 History
               </TabsTrigger>
+              {userProfile?.role === 'super_admin' && (
+                <TabsTrigger value="admin" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
+                  <Shield className="w-4 h-4 mr-2" />
+                  Admin Panel
+                </TabsTrigger>
+              )}
             </TabsList>
             
             {contacts.length > 0 && (
@@ -1073,6 +1530,201 @@ export default function App() {
           </div>
 
           <AnimatePresence mode="wait">
+            {/* Dashboard Tab */}
+            <TabsContent value="dashboard" key="dashboard-content">
+              <motion.div
+                key="dashboard-motion"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="space-y-8"
+              >
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <Card className="border-gray-200 shadow-sm">
+                    <CardContent className="p-6 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-500 font-medium">Total Emails Reached</p>
+                        <p className="text-3xl font-extrabold text-gray-900">{dashboardStats.totalSent}</p>
+                      </div>
+                      <div className="p-3 bg-brand-50 rounded-xl text-brand-600">
+                        <Mail className="w-6 h-6" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-gray-200 shadow-sm">
+                    <CardContent className="p-6 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-500 font-medium">Delivery Success Rate</p>
+                        <p className="text-3xl font-extrabold text-green-600">{dashboardStats.successRate}%</p>
+                      </div>
+                      <div className="p-3 bg-green-50 rounded-xl text-green-600">
+                        <CheckCircle2 className="w-6 h-6" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-gray-200 shadow-sm">
+                    <CardContent className="p-6 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-500 font-medium">Campaigns Blasted</p>
+                        <p className="text-3xl font-extrabold text-gray-900">{dashboardStats.campaignsCount}</p>
+                      </div>
+                      <div className="p-3 bg-purple-50 rounded-xl text-purple-600">
+                        <History className="w-6 h-6" />
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-gray-200 shadow-sm">
+                    <CardContent className="p-6 flex items-center justify-between">
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-500 font-medium">Loaded Recipients</p>
+                        <p className="text-3xl font-extrabold text-gray-900">{dashboardStats.currentRecipientsCount}</p>
+                      </div>
+                      <div className="p-3 bg-indigo-50 rounded-xl text-indigo-600">
+                        <Users className="w-6 h-6" />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Dashboard Main Visual */}
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Performance Chart */}
+                  <Card className="lg:col-span-2 border-gray-200 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <CardTitle>Blast Performance History</CardTitle>
+                          <CardDescription>Visual metrics tracking delivery success over past blasts</CardDescription>
+                        </div>
+                        <TrendingUp className="w-5 h-5 text-gray-400" />
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      {history.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                          <History className="w-12 h-12 mb-4 opacity-20" />
+                          <p className="text-sm">No campaign history available yet.</p>
+                          <Button variant="outline" size="sm" className="mt-4" onClick={() => setActiveTab('compose')}>
+                            Create a Blast
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="h-72 mt-4">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart
+                              data={[...history].reverse().slice(0, 10).reverse().map((item, idx) => ({
+                                name: `Blast ${idx + 1}`,
+                                Sent: item.successCount ?? (item.status === 'success' || !item.status ? item.recipientCount : 0),
+                                Failed: item.failedCount ?? (item.status === 'failed' ? item.recipientCount : 0),
+                                date: item.timestamp,
+                                subject: item.subject
+                              }))}
+                              margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                            >
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                              <Tooltip
+                                cursor={{ fill: 'rgba(0,0,0,0.02)' }}
+                                contentStyle={{
+                                  borderRadius: '8px',
+                                  border: '1px solid #f3f4f6',
+                                  boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)',
+                                  fontSize: '11px',
+                                  padding: '8px'
+                                }}
+                              />
+                              <Bar dataKey="Sent" stackId="sum" fill="#16a34a" radius={[0, 0, 4, 4]} barSize={28} />
+                              <Bar dataKey="Failed" stackId="sum" fill="#dc2626" radius={[4, 4, 0, 0]} barSize={28} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Actions & Health Card */}
+                  <div className="space-y-6">
+                    <Card className="border-gray-200 shadow-sm">
+                      <CardHeader>
+                        <CardTitle>Quick Navigation</CardTitle>
+                        <CardDescription>Fast access controls for email blasts</CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left h-12 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-200 group transition-all"
+                          onClick={() => setActiveTab('compose')}
+                        >
+                          <Send className="w-4 h-4 mr-3 text-gray-400 group-hover:text-brand-600" />
+                          <div>
+                            <p className="font-bold text-xs">Compose & Blast</p>
+                            <p className="text-[10px] text-gray-500 mt-0.5">Write message, pick templates, & send</p>
+                          </div>
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left h-12 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-200 group transition-all"
+                          onClick={() => setActiveTab('contacts')}
+                        >
+                          <Users className="w-4 h-4 mr-3 text-gray-400 group-hover:text-brand-600" />
+                          <div>
+                            <p className="font-bold text-xs">Manage Recipients</p>
+                            <p className="text-[10px] text-gray-500 mt-0.5">Import CSV lists or enter emails</p>
+                          </div>
+                        </Button>
+
+                        <Button
+                          variant="outline"
+                          className="w-full justify-start text-left h-12 hover:bg-brand-50 hover:text-brand-700 hover:border-brand-200 group transition-all"
+                          onClick={() => setActiveTab('history')}
+                        >
+                          <History className="w-4 h-4 mr-3 text-gray-400 group-hover:text-brand-600" />
+                          <div>
+                            <p className="font-bold text-xs">View Blast History</p>
+                            <p className="text-[10px] text-gray-500 mt-0.5">Track statistics and review logs</p>
+                          </div>
+                        </Button>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-gray-200 shadow-sm bg-gray-50">
+                      <CardContent className="p-6">
+                        <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider mb-2">System Insight</h4>
+                        {history.length === 0 ? (
+                          <p className="text-xs text-gray-500 leading-relaxed">
+                            No campaigns sent yet. Import recipients from a CSV in the <strong>Recipients</strong> tab, select your message parameters on the <strong>Compose & Blast</strong> tab, then send your first campaign!
+                          </p>
+                        ) : dashboardStats.successRate === 100 ? (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-green-700 font-semibold text-xs">
+                              <CheckCircle2 className="w-4 h-4" /> Perfect Delivery Streak
+                            </div>
+                            <p className="text-[11px] text-gray-600 leading-relaxed">
+                              Fantastic! Your delivery rate is at a flawless <strong>100%</strong>. All recipients across campaigns have received their reminders successfully.
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-2 text-amber-700 font-semibold text-xs">
+                              <AlertCircle className="w-4 h-4" /> Delivery Status Notice
+                            </div>
+                            <p className="text-[11px] text-gray-600 leading-relaxed">
+                              You've had some failed reminders in previous campaigns (overall delivery rate is <strong>{dashboardStats.successRate}%</strong>). Review affected contacts in the <strong>History</strong> log to retry.
+                            </p>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </div>
+              </motion.div>
+            </TabsContent>
+
             {/* Compose Tab */}
             <TabsContent value="compose" key="compose-content">
               <motion.div 
@@ -1089,11 +1741,24 @@ export default function App() {
                         <FileUp className="w-5 h-5" />
                         <div>
                           <p className="font-bold leading-none">Step 1: Import Data</p>
-                          <p className="text-xs text-brand-100 mt-1">Upload your CSV file to start</p>
+                          <p className="text-xs text-brand-100 mt-1">
+                            {importedFileName ? `Loaded: ${importedFileName}` : 'Upload your CSV file to start'}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Dialog open={isImporting} onOpenChange={setIsImporting}>
+                        <Dialog 
+                          open={isImporting} 
+                          onOpenChange={(open) => {
+                            if (!open) {
+                              setCsvFile(null);
+                              setCsvHeaders([]);
+                              setCsvData([]);
+                              setCsvMapping({});
+                            }
+                            setIsImporting(open);
+                          }}
+                        >
                           <DialogTrigger render={
                             <Button variant="secondary" size="sm" className="bg-white text-brand-600 hover:bg-brand-50 border-none">
                               <FileUp className="w-4 h-4 mr-2" />
@@ -1114,7 +1779,7 @@ export default function App() {
                                   accept=".csv" 
                                   className="hidden" 
                                   id="csv-upload-compose"
-                                  onChange={(e) => setCsvFile(e.target.files?.[0] || null)}
+                                  onChange={handleFileSelect}
                                 />
                                 <label htmlFor="csv-upload-compose" className="cursor-pointer">
                                   {csvFile ? (
@@ -1144,15 +1809,30 @@ export default function App() {
                           </DialogContent>
                         </Dialog>
                         {contacts.length > 0 && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={clearContacts}
-                            className="text-white hover:bg-white/10"
-                          >
-                            <Trash2 className="w-4 h-4 mr-2" />
-                            Clear
-                          </Button>
+                          <Dialog open={isConfirmClearOpen} onOpenChange={setIsConfirmClearOpen}>
+                            <DialogTrigger render={
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                className="text-white hover:bg-white/10"
+                              >
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Clear
+                              </Button>
+                            } />
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Clear all contacts?</DialogTitle>
+                                <DialogDescription>
+                                  This action cannot be undone. This will permanently delete all your contacts.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <DialogFooter>
+                                <Button variant="ghost" onClick={() => setIsConfirmClearOpen(false)}>Cancel</Button>
+                                <Button variant="destructive" onClick={clearContacts}>Clear Contacts</Button>
+                              </DialogFooter>
+                            </DialogContent>
+                          </Dialog>
                         )}
                       </div>
                     </div>
@@ -1233,6 +1913,34 @@ export default function App() {
                           value={body}
                           onChange={(e) => setBody(e.target.value)}
                         />
+                        {missingPlaceholders.length > 0 && contacts.length > 0 && (
+                          <div className="flex items-start gap-2 mt-3 p-3 bg-red-50 rounded-lg text-red-800 border border-red-200 shadow-sm">
+                            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+                            <div className="text-sm">
+                              <p className="font-semibold text-red-900">Missing Mapping</p>
+                              <p className="mt-1">
+                                The following placeholders in your template do not match any mapped data in your current recipients list. This could lead to blank values in the sent emails.
+                              </p>
+                              <div className="flex flex-wrap gap-1.5 mt-2">
+                                {missingPlaceholders.map(p => (
+                                  <span key={p} className="px-2 py-0.5 bg-red-100 border border-red-200 rounded-md text-xs font-mono text-red-900">#{p}</span>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        {contacts.length > 0 && missingPlaceholders.length === 0 && (subject || body) && (
+                          <AnimatePresence>
+                            <motion.div 
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              className="flex items-center gap-2 mt-3 p-3 bg-green-50 rounded-lg text-green-800 border border-green-200 shadow-sm"
+                            >
+                              <CheckCircle2 className="w-5 h-5 shrink-0 text-green-600" />
+                              <span className="text-sm font-medium">All placeholders in your template match valid recipient columns!</span>
+                            </motion.div>
+                          </AnimatePresence>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -1288,22 +1996,6 @@ export default function App() {
                       </div>
                     </CardContent>
                   </Card>
-
-                  <Card className="bg-brand-600 text-white border-none shadow-xl shadow-brand-200">
-                    <CardContent className="pt-6">
-                      <div className="flex items-start gap-4">
-                        <div className="p-2 bg-white/20 rounded-lg">
-                          <Sparkles className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="font-bold mb-1">AI Tip</p>
-                          <p className="text-sm text-brand-100 leading-relaxed">
-                            Personalized subject lines increase open rates by 26%. Try including a name placeholder!
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
                 </div>
               </motion.div>
             </TabsContent>
@@ -1350,14 +2042,26 @@ export default function App() {
                 </Card>
 
                 <Card className="md:col-span-2 border-gray-200 shadow-sm">
-                  <CardHeader className="flex flex-row items-center justify-between">
+                  <CardHeader className="flex flex-col space-y-4 md:flex-row md:items-center md:justify-between md:space-y-0 pb-4">
                     <div>
                       <CardTitle>Recipient List</CardTitle>
                       <CardDescription>Review the data imported from your CSV.</CardDescription>
                     </div>
-                    <Badge variant="secondary" className="h-6">
-                      {contacts.length} Total
-                    </Badge>
+                    <div className="flex flex-col space-y-2 md:flex-row md:items-center md:space-y-0 md:space-x-4">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+                        <Input
+                          type="text"
+                          placeholder="Search recipients..."
+                          className="pl-8 w-full md:w-[250px]"
+                          value={contactSearchQuery}
+                          onChange={(e) => setContactSearchQuery(e.target.value)}
+                        />
+                      </div>
+                      <Badge variant="secondary" className="h-6 w-fit">
+                        {contacts.length} Total
+                      </Badge>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <ScrollArea className="h-[400px] pr-4">
@@ -1366,9 +2070,20 @@ export default function App() {
                           <Users className="w-12 h-12 mb-4 opacity-20" />
                           <p>No contacts added yet</p>
                         </div>
+                      ) : contacts.filter(contact => 
+                            (contact.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())) || 
+                            (contact.email.toLowerCase().includes(contactSearchQuery.toLowerCase()))
+                          ).length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                          <Search className="w-12 h-12 mb-4 opacity-20" />
+                          <p>No contacts found matching "{contactSearchQuery}"</p>
+                        </div>
                       ) : (
                         <div className="space-y-3">
-                          {contacts.map((contact) => (
+                          {contacts.filter(contact => 
+                            (contact.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())) || 
+                            (contact.email.toLowerCase().includes(contactSearchQuery.toLowerCase()))
+                          ).map((contact) => (
                             <div 
                               key={contact.id} 
                               className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-brand-200 hover:shadow-md transition-all group"
@@ -1407,7 +2122,46 @@ export default function App() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
+                className="space-y-6"
               >
+                {history.length > 0 && (
+                  <Card className="border-gray-200 shadow-sm">
+                    <CardHeader>
+                      <CardTitle>Delivery Overview</CardTitle>
+                      <CardDescription>Success vs. Failure rates across recent campaigns</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="h-64 mt-4">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={
+                            [...history].reverse().slice(0, 10).reverse().map((item, i) => {
+                              let st = 'N/A';
+                              try { st = new Date(item.timestamp).toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) } catch(e){}
+                              return {
+                                name: `Camp ${i + 1}`,
+                                date: st,
+                                tooltipName: item.subject,
+                                Sent: item.successCount ?? (item.status === 'success' || !item.status ? item.recipientCount : 0),
+                                Failed: item.failedCount ?? (item.status === 'failed' ? item.recipientCount : 0)
+                              }
+                            })
+                          } margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                            <Tooltip 
+                              cursor={{ fill: 'rgba(0,0,0,0.04)' }} 
+                              contentStyle={{ borderRadius: '8px', border: '1px solid #f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px 12px' }} 
+                              labelFormatter={(label, payload) => payload && payload.length > 0 ? payload[0].payload.tooltipName : label}
+                            />
+                            <Bar dataKey="Sent" stackId="a" fill="#16a34a" radius={[0, 0, 4, 4]} barSize={40} />
+                            <Bar dataKey="Failed" stackId="a" fill="#dc2626" radius={[4, 4, 0, 0]} barSize={40} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 <Card className="border-gray-200 shadow-sm">
                   <CardHeader>
                     <CardTitle>Blast History</CardTitle>
@@ -1440,10 +2194,22 @@ export default function App() {
                                 <td className="py-4 text-sm text-gray-500">{item.timestamp}</td>
                                 <td className="py-4 text-sm text-gray-500">{item.recipientCount}</td>
                                 <td className="py-4">
-                                  <Badge className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100">
-                                    <CheckCircle2 className="w-3 h-3 mr-1" />
-                                    Delivered
-                                  </Badge>
+                                  {item.status === 'success' || !item.status ? (
+                                    <Badge className="bg-green-50 text-green-700 border-green-200 hover:bg-green-100">
+                                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                                      Delivered
+                                    </Badge>
+                                  ) : item.status === 'partial' ? (
+                                    <Badge className="bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100">
+                                      <AlertTriangle className="w-3 h-3 mr-1" />
+                                      Partial Success
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="bg-red-50 text-red-700 border-red-200 hover:bg-red-100">
+                                      <AlertTriangle className="w-3 h-3 mr-1" />
+                                      Failed
+                                    </Badge>
+                                  )}
                                 </td>
                                 <td className="py-4 text-right">
                                   <Button 
@@ -1466,12 +2232,298 @@ export default function App() {
                 </Card>
               </motion.div>
             </TabsContent>
+
+            {userProfile?.role === 'super_admin' && (
+              <TabsContent value="admin" key="admin-content">
+                <motion.div
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.25 }}
+                  className="space-y-8"
+                >
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl border border-gray-200">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                        <Shield className="w-5 h-5 text-brand-600" />
+                        Admin Control Panel
+                      </h2>
+                      <p className="text-gray-500 text-xs mt-1">
+                        Configure who possesses authorization to log in and use the Encore Portal.
+                      </p>
+                    </div>
+                    <div className="bg-brand-50 border border-brand-100 rounded-lg px-4 py-2.5 text-right">
+                      <span className="text-[10px] text-brand-700 font-bold uppercase tracking-wider block">Super Administrator</span>
+                      <span className="text-xs text-brand-900 font-semibold">{user?.email}</span>
+                    </div>
+                  </div>
+
+                  {/* Admin stats */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                    <Card className="border border-gray-200 shadow-sm">
+                      <CardContent className="p-6 flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Active Employees</p>
+                          <h3 className="text-2xl font-black mt-2 text-gray-900">
+                            {allUsers.filter(u => u.status === 'active').length}
+                          </h3>
+                        </div>
+                        <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className={`border shadow-sm transition-all duration-300 ${allUsers.some(u => u.status === 'pending') ? 'border-amber-200 bg-amber-50/20' : 'border-gray-200'}`}>
+                      <CardContent className="p-6 flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pending Approvals</p>
+                          <h3 className={`text-2xl font-black mt-2 ${allUsers.some(u => u.status === 'pending') ? 'text-amber-700 animate-pulse' : 'text-gray-900'}`}>
+                            {allUsers.filter(u => u.status === 'pending').length}
+                          </h3>
+                        </div>
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${allUsers.some(u => u.status === 'pending') ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-400'}`}>
+                          <Clock className="w-6 h-6" />
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border border-gray-200 shadow-sm">
+                      <CardContent className="p-6 flex items-center justify-between">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Suspended / Disabled</p>
+                          <h3 className="text-2xl font-black mt-2 text-gray-900">
+                            {allUsers.filter(u => u.status === 'inactive').length}
+                          </h3>
+                        </div>
+                        <div className="w-12 h-12 bg-red-50 rounded-xl flex items-center justify-center text-red-600">
+                          <AlertTriangle className="w-6 h-6" />
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Split columns */}
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Add team member by whitelist */}
+                    <div className="lg:col-span-1">
+                      <Card className="border border-gray-200 shadow-sm sticky top-24">
+                        <CardHeader>
+                          <CardTitle className="text-sm font-bold flex items-center gap-2 text-gray-900">
+                            <UserPlus className="w-4 h-4 text-brand-600" />
+                            Whitelist Member
+                          </CardTitle>
+                          <CardDescription className="text-xs">
+                            Grant login clearance in advance. Once added, they will skip approval upon their initial login.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                          <form onSubmit={handleAddTeamMemberByEmail} className="space-y-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="teamEmail">Employee Work Email</Label>
+                              <Input
+                                id="teamEmail"
+                                type="email"
+                                placeholder="name@encorefinancials.com"
+                                value={newTeamEmail}
+                                onChange={(e) => setNewTeamEmail(e.target.value)}
+                                className="h-10"
+                                required
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="teamName">Employee Display Name (Optional)</Label>
+                              <Input
+                                id="teamName"
+                                type="text"
+                                placeholder="Juan Dela Cruz"
+                                value={newTeamName}
+                                onChange={(e) => setNewTeamName(e.target.value)}
+                                className="h-10"
+                              />
+                            </div>
+                            <Button 
+                              type="submit" 
+                              className="w-full h-10 bg-brand-600 hover:bg-brand-700 text-white font-medium"
+                            >
+                              Add Whitelisted Member
+                            </Button>
+                          </form>
+                        </CardContent>
+                      </Card>
+                    </div>
+
+                    {/* Manage Registered / Whitelisted Users Grid */}
+                    <div className="lg:col-span-2 space-y-6">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-gray-200">
+                        <div className="relative w-full sm:max-w-xs">
+                          <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+                          <Input
+                            type="search"
+                            placeholder="Filter members..."
+                            value={userSearchQuery}
+                            onChange={(e) => setUserSearchQuery(e.target.value)}
+                            className="pl-9 h-10 w-full"
+                          />
+                        </div>
+                        <span className="text-xs font-semibold text-gray-500">
+                          Showing {filteredUsers.length} of {allUsers.length} total profiles
+                        </span>
+                      </div>
+
+                      <Card className="border border-gray-200 overflow-hidden shadow-sm">
+                        <CardContent className="p-0">
+                          {loadingAllUsers && allUsers.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center p-12 text-gray-500 gap-2">
+                              <Loader2 className="w-6 h-6 animate-spin text-brand-600" />
+                              <p className="text-xs">Fetching users from database...</p>
+                            </div>
+                          ) : filteredUsers.length === 0 ? (
+                            <div className="text-center p-12 text-gray-500">
+                              <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-40 text-gray-400" />
+                              <p className="text-sm font-semibold">No results match filters</p>
+                              <p className="text-xs mt-1">Try another search filter or verify invitations.</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-gray-50 border-b border-gray-100 text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                                    <th className="py-3 px-4">Member Info</th>
+                                    <th className="py-3 px-4">Role</th>
+                                    <th className="py-3 px-4 text-center">Status</th>
+                                    <th className="py-3 px-4 text-right">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100 text-xs">
+                                  {filteredUsers.map((u) => {
+                                    const isSelf = u.uid === user?.uid;
+                                    const isInvitationOnly = u.uid.startsWith('invite_');
+                                    
+                                    return (
+                                      <tr key={u.uid} className="hover:bg-gray-50/45 transition-colors">
+                                        <td className="py-4 px-4 flex items-center gap-3">
+                                          {u.photoURL ? (
+                                            <img src={u.photoURL} alt="Profile" className="w-8 h-8 rounded-full" referrerPolicy="no-referrer" />
+                                          ) : (
+                                            <div className="w-8 h-8 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center font-bold text-xs border border-brand-100/50">
+                                              {(u.displayName || u.email || 'E').charAt(0).toUpperCase()}
+                                            </div>
+                                          )}
+                                          <div>
+                                            <div className="font-semibold text-gray-900 flex items-center gap-1.5 flex-wrap">
+                                              <span>{u.displayName || 'Whitelisted Invitation'}</span>
+                                              {isSelf && (
+                                                <Badge variant="outline" className="bg-brand-50 text-brand-700 border-brand-200 text-[9px] h-4 py-0">
+                                                  YOU
+                                                </Badge>
+                                              )}
+                                              {isInvitationOnly && (
+                                                <Badge variant="outline" className="bg-yellow-50 text-yellow-850 border-yellow-200 text-[9px] h-4 py-0 font-medium">
+                                                  UNREGISTERED
+                                                </Badge>
+                                              )}
+                                            </div>
+                                            <div className="text-gray-500 font-mono text-[10px] mt-0.5">{u.email}</div>
+                                          </div>
+                                        </td>
+                                        <td className="py-4 px-4 font-medium text-gray-700">
+                                          {u.role === 'super_admin' ? (
+                                            <span className="flex items-center gap-1 text-brand-700 font-semibold">
+                                              <Shield className="w-3 h-3" />
+                                              Super Admin
+                                            </span>
+                                          ) : (
+                                            <span className="text-gray-600">Employee</span>
+                                          )}
+                                        </td>
+                                        <td className="py-4 px-4 text-center">
+                                          {u.status === 'active' && (
+                                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100">
+                                              <span className="w-1.5 h-1.5 bg-emerald-600 rounded-full animate-pulse" />
+                                              Active / Approved
+                                            </span>
+                                          )}
+                                          {u.status === 'pending' && (
+                                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-100">
+                                              <span className="w-1.5 h-1.5 bg-amber-600 rounded-full" />
+                                              Pending Approval
+                                            </span>
+                                          )}
+                                          {u.status === 'inactive' && (
+                                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-100">
+                                              <span className="w-1.5 h-1.5 bg-red-600 rounded-full" />
+                                              Suspended / Blocked
+                                            </span>
+                                          )}
+                                        </td>
+                                        <td className="py-4 px-4 text-right">
+                                          <div className="flex items-center justify-end gap-2">
+                                            {!isSelf && (
+                                              <>
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  type="button"
+                                                  onClick={() => handleToggleUserStatus(u)}
+                                                  className={`h-8 text-[11px] font-medium flex items-center gap-1 transition-all ${
+                                                    u.status === 'active'
+                                                      ? 'border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800'
+                                                      : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800'
+                                                  }`}
+                                                >
+                                                  {u.status === 'active' ? (
+                                                    <>
+                                                      <Lock className="w-3 h-3" />
+                                                      <span>Suspend</span>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <UserCheck className="w-3 h-3" />
+                                                      <span>Approve / Grant</span>
+                                                    </>
+                                                  )}
+                                                </Button>
+                                                
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  type="button"
+                                                  onClick={() => handleDeleteUserRecord(u)}
+                                                  className="h-8 w-8 p-0 border-red-100 text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+                                                  title="Revoke and Delete Access"
+                                                >
+                                                  <Trash2 className="w-3.5 h-3.5" />
+                                                </Button>
+                                              </>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </div>
+                  </div>
+                </motion.div>
+              </TabsContent>
+            )}
           </AnimatePresence>
         </Tabs>
       </main>
 
       {/* History Details Dialog */}
-      <Dialog open={!!selectedHistory} onOpenChange={(open) => !open && setSelectedHistory(null)}>
+      <Dialog open={!!selectedHistory} onOpenChange={(open) => {
+        if (!open) {
+          setSelectedHistory(null);
+          setSelectedHistoryRecipientIndex(0);
+        }
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Campaign Details</DialogTitle>
@@ -1481,34 +2533,161 @@ export default function App() {
           </DialogHeader>
           <div className="space-y-6 py-4">
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Status</p>
-                <Badge className="bg-green-50 text-green-700 border-green-200">
-                  <CheckCircle2 className="w-3 h-3 mr-1" />
-                  Delivered
-                </Badge>
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Status</p>
+                  {selectedHistory?.status === 'success' || !selectedHistory?.status ? (
+                    <Badge className="bg-green-50 text-green-700 border-green-200">
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      Delivered
+                    </Badge>
+                  ) : selectedHistory?.status === 'partial' ? (
+                    <Badge className="bg-amber-50 text-amber-700 border-amber-200">
+                      <AlertTriangle className="w-3 h-3 mr-1" />
+                      Partial Success
+                    </Badge>
+                  ) : (
+                    <Badge className="bg-red-50 text-red-700 border-red-200">
+                      <AlertTriangle className="w-3 h-3 mr-1" />
+                      Failed
+                    </Badge>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Recipients</p>
+                  <p className="text-sm font-medium">{selectedHistory?.recipientCount} total contacts</p>
+                </div>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Recipients</p>
-                <p className="text-sm font-medium">{selectedHistory?.recipientCount} contacts</p>
+                <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-2">Delivery Summary</p>
+                <div className="h-24 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[
+                        { name: 'Sent', value: selectedHistory?.successCount ?? selectedHistory?.recipientCount ?? 0, color: '#16a34a' }, // green-600
+                        { name: 'Failed', value: selectedHistory?.failedCount ?? 0, color: '#dc2626' } // red-600
+                      ]}
+                      layout="vertical"
+                      margin={{ top: 0, right: 20, left: -20, bottom: 0 }}
+                    >
+                      <XAxis type="number" hide />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
+                      <Tooltip 
+                        cursor={{fill: 'transparent'}}
+                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '4px 8px' }}
+                      />
+                      <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
+                        {
+                          [
+                            { name: 'Sent', value: selectedHistory?.successCount ?? selectedHistory?.recipientCount ?? 0, color: '#16a34a' },
+                            { name: 'Failed', value: selectedHistory?.failedCount ?? 0, color: '#dc2626' }
+                          ].map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))
+                        }
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
             <Separator />
-            <div className="space-y-2">
-              <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Subject</p>
-              <p className="text-sm font-medium p-3 bg-gray-50 rounded-lg border border-gray-100">
-                {selectedHistory?.subject}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Message Content</p>
-              <div className="text-sm text-gray-600 p-4 bg-gray-50 rounded-lg border border-gray-100 whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
-                {selectedHistory?.body}
-              </div>
-            </div>
+            
+            {/* If we have full rawContacts data, we show exact personalized preview */}
+            {selectedHistory?.rawContacts && selectedHistory.rawContacts.length > 0 ? (
+              <>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-100">
+                    <div className="text-xs text-gray-500 font-medium ml-2">
+                      Viewing exact email sent to recipient {selectedHistoryRecipientIndex + 1} of {selectedHistory.rawContacts.length}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-7 text-xs"
+                        onClick={() => setSelectedHistoryRecipientIndex(prev => Math.max(0, prev - 1))}
+                        disabled={selectedHistoryRecipientIndex === 0}
+                      >
+                        Previous
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="h-7 text-xs"
+                        onClick={() => setSelectedHistoryRecipientIndex(prev => Math.min((selectedHistory?.rawContacts?.length || 1) - 1, prev + 1))}
+                        disabled={selectedHistoryRecipientIndex === (selectedHistory?.rawContacts?.length || 1) - 1}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Recipient Details</p>
+                  <p className="text-sm font-medium p-3 bg-gray-50 rounded-lg border border-gray-100 flex items-center gap-2">
+                     <span className="font-semibold">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].email}</span>
+                     <span className="text-gray-500">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].name ? `(${selectedHistory.rawContacts[selectedHistoryRecipientIndex].name})` : ''}</span>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Subject</p>
+                  <p className="text-sm font-medium p-3 bg-gray-50 rounded-lg border border-gray-100">
+                    {replacePlaceholders(selectedHistory.subject, selectedHistory.rawContacts[selectedHistoryRecipientIndex])}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-end">
+                    <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Message Content</p>
+                  </div>
+                  <div className="text-sm text-gray-600 p-4 bg-gray-50 rounded-lg border border-gray-100 whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
+                    {replacePlaceholders(selectedHistory.body, selectedHistory.rawContacts[selectedHistoryRecipientIndex])}
+                  </div>
+                </div>
+              </>
+            ) : (
+              /* Fallback for older blast records without rawContacts */
+              <>
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg flex gap-3 text-sm">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0" />
+                  <div>
+                    <strong className="text-amber-800">Legacy Campaign Record</strong>
+                    <p className="text-amber-700 leading-relaxed text-xs mt-1">Detailed recipient-specific email previews are not available for campaigns sent before this feature was introduced.</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Template Subject</p>
+                  <p className="text-sm font-medium p-3 bg-gray-50 rounded-lg border border-gray-100 text-gray-500">
+                    {selectedHistory?.subject}
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Template Content</p>
+                  <div className="text-sm text-gray-500 p-4 bg-gray-50 rounded-lg border border-gray-100 whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
+                    {selectedHistory?.body}
+                  </div>
+                </div>
+                {selectedHistory?.recipients && selectedHistory.recipients.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Sent To</p>
+                    <div className="text-sm text-gray-600 p-2 bg-gray-50 rounded-lg border border-gray-100 max-h-[150px] overflow-y-auto">
+                      <ul className="list-disc pl-5 space-y-1">
+                        {selectedHistory.recipients.map((r, i) => (
+                          <li key={i}>{r.email} {r.name ? `(${r.name})` : ''}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <DialogFooter>
-            <Button onClick={() => setSelectedHistory(null)}>Close</Button>
+            <Button onClick={() => {
+              setSelectedHistory(null);
+              setSelectedHistoryRecipientIndex(0);
+            }}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1661,6 +2840,7 @@ export default function App() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
 
       {/* Footer */}
       <footer className="max-w-6xl mx-auto px-6 py-12 border-t border-gray-200 mt-12">

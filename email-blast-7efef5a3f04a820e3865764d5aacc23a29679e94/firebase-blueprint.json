@@ -9,8 +9,6 @@
         "email": { "type": "string", "format": "email" },
         "displayName": { "type": "string" },
         "photoURL": { "type": "string" },
-        "role": { "type": "string", "enum": ["super_admin", "user"] },
-        "status": { "type": "string", "enum": ["active", "pending", "inactive"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "email"]

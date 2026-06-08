@@ -16,10 +16,6 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    function isSuperAdmin() {
-      return isSignedIn() && request.auth.token.email.toLowerCase() == 'encorefinancials@gmail.com';
-    }
-
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -49,7 +45,6 @@ service cloud.firestore {
 
     // 3. Match Blocks
     match /users/{userId} {
-      allow read, write: if isSuperAdmin();
       allow get: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data)
