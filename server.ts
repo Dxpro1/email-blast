@@ -150,28 +150,41 @@ async function startServer() {
           continue;
         }
 
-        // Clean output HTML body to replace relative paths with hosted logo URL
+        // Clean output HTML body to replace relative paths with inline CID logo references
         let emailHtml = msg.body;
-        const possibleUrls = [
-          'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+        const possibleLocalUrls = [
           '/assets/img/logo.png',
           '/assets/img/logo.svg',
           'logo.png',
           'logo.svg'
         ];
-        
-        for (const url of possibleUrls) {
+        let embedLogo = false;
+
+        for (const url of possibleLocalUrls) {
           if (emailHtml.includes(url)) {
-            emailHtml = emailHtml.split(url).join('https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png');
+            emailHtml = emailHtml.split(url).join('cid:logo');
+            embedLogo = true;
           }
         }
 
-        validMessages.push({
+        const messagePayload: any = {
           to: recipient,
           subject: msg.subject,
           htmlBody: emailHtml,
           originalTo: msg.to
-        });
+        };
+
+        if (embedLogo) {
+          const logoData = await getLogoAsBase64();
+          messagePayload.attachments = [{
+            filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
+            content: logoData.base64,
+            contentId: 'logo',
+            contentType: logoData.type || 'image/png'
+          }];
+        }
+
+        validMessages.push(messagePayload);
       }
 
       // If no valid messages left to send, return immediately
@@ -190,7 +203,8 @@ async function startServer() {
               from: 'Encore <no-reply@encorefinancials.com>',
               to: msg.to,
               subject: msg.subject,
-              html: msg.htmlBody
+            html: msg.htmlBody,
+            attachments: msg.attachments
             });
 
             if (individualRes && individualRes.error) {
@@ -223,34 +237,42 @@ async function startServer() {
       };
 
       try {
-        console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
+        const hasAttachments = validMessages.some(msg => Array.isArray(msg.attachments) && msg.attachments.length > 0);
 
-        const batchPayload = validMessages.map(msg => ({
-          from: 'Encore <no-reply@encorefinancials.com>',
-          to: msg.to,
-          subject: msg.subject,
-          html: msg.htmlBody
-        }));
-
-        const batchResult = await activeResend.batch.send(batchPayload);
-
-        if (batchResult && batchResult.error) {
-          console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
+        if (hasAttachments) {
+          console.log(`[send-blast] Sending ${validMessages.length} individual message(s) with inline attachments...`);
           const fallbackResults = await sendIndividualFallback(validMessages);
           results.push(...fallbackResults);
         } else {
-          // Success! Process each response item mapping 1-to-1
-          const batchData = batchResult?.data || [];
-          validMessages.forEach((msg, idx) => {
-            const dataItem = batchData[idx];
-            results.push({
-              to: msg.originalTo,
-              success: true,
-              id: dataItem?.id || null,
-              error: null
+          console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
+
+          const batchPayload = validMessages.map(msg => ({
+            from: 'Encore <no-reply@encorefinancials.com>',
+            to: msg.to,
+            subject: msg.subject,
+            html: msg.htmlBody
+          }));
+
+          const batchResult = await activeResend.batch.send(batchPayload);
+
+          if (batchResult && batchResult.error) {
+            console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
+            const fallbackResults = await sendIndividualFallback(validMessages);
+            results.push(...fallbackResults);
+          } else {
+            // Success! Process each response item mapping 1-to-1
+            const batchData = batchResult?.data || [];
+            validMessages.forEach((msg, idx) => {
+              const dataItem = batchData[idx];
+              results.push({
+                to: msg.originalTo,
+                success: true,
+                id: dataItem?.id || null,
+                error: null
+              });
             });
-          });
-          console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
+            console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
+          }
         }
       } catch (batchException: any) {
         console.warn(`Resend Batch API crashed during request, activating individual fallback:`, batchException);
