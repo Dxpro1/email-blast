@@ -33,23 +33,23 @@ async function getLogoAsBase64() {
     return { base64: cachedLogoBase64, type: cachedLogoType };
   }
 
-  // Prefer a local PNG for CID/email clients, then fall back to SVG if PNG is unavailable.
+  // Prefer a local SVG for email embeds to avoid embedding a very large PNG file.
   try {
-    const localPngPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.png');
-    if (fs.existsSync(localPngPath)) {
-      const fileContent = fs.readFileSync(localPngPath);
-      cachedLogoBase64 = fileContent.toString('base64');
-      cachedLogoType = 'image/png';
-      console.log(`Loaded company logo in Vercel API from local file: ${localPngPath} (${fileContent.length} bytes)`);
-      return { base64: cachedLogoBase64, type: cachedLogoType };
-    }
-
     const localSvgPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.svg');
     if (fs.existsSync(localSvgPath)) {
       const fileContent = fs.readFileSync(localSvgPath);
       cachedLogoBase64 = fileContent.toString('base64');
       cachedLogoType = 'image/svg+xml';
       console.log(`Loaded company logo in Vercel API from local file: ${localSvgPath} (${fileContent.length} bytes)`);
+      return { base64: cachedLogoBase64, type: cachedLogoType };
+    }
+
+    const localPngPath = path.join(process.cwd(), 'public', 'assets', 'img', 'logo.png');
+    if (fs.existsSync(localPngPath)) {
+      const fileContent = fs.readFileSync(localPngPath);
+      cachedLogoBase64 = fileContent.toString('base64');
+      cachedLogoType = 'image/png';
+      console.log(`Loaded company logo in Vercel API from local file: ${localPngPath} (${fileContent.length} bytes)`);
       return { base64: cachedLogoBase64, type: cachedLogoType };
     }
   } catch (err) {
@@ -142,7 +142,7 @@ router.post('/send-blast', async (req, res) => {
         continue;
       }
 
-      // Clean output HTML body to replace relative paths with inline CID logo references
+      // Clean output HTML body and replace relative logo paths with a local data URI
       let emailHtml = msg.body;
       const possibleLocalUrls = [
         '/assets/img/logo.png',
@@ -150,33 +150,24 @@ router.post('/send-blast', async (req, res) => {
         'logo.png',
         'logo.svg'
       ];
-      let embedLogo = false;
+      let embeddedDataUri: string | null = null;
 
       for (const url of possibleLocalUrls) {
         if (emailHtml.includes(url)) {
-          emailHtml = emailHtml.split(url).join('cid:logo');
-          embedLogo = true;
+          if (!embeddedDataUri) {
+            const logoData = await getLogoAsBase64();
+            embeddedDataUri = `data:${logoData.type};base64,${logoData.base64}`;
+          }
+          emailHtml = emailHtml.split(url).join(embeddedDataUri);
         }
       }
 
-      const messagePayload: any = {
+      validMessages.push({
         to: recipient,
         subject: msg.subject,
         htmlBody: emailHtml,
         originalTo: msg.to
-      };
-
-      if (embedLogo) {
-        const logoData = await getLogoAsBase64();
-        messagePayload.attachments = [{
-          filename: logoData.type.includes('svg') ? 'logo.svg' : 'logo.png',
-          content: logoData.base64,
-          contentId: 'logo',
-          contentType: logoData.type || 'image/png'
-        }];
-      }
-
-      validMessages.push(messagePayload);
+      });
     }
 
     // If no valid messages left to send, return immediately
