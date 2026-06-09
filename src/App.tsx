@@ -26,7 +26,8 @@ import {
   Lock,
   UserPlus,
   UserCheck,
-  Calendar
+  Calendar,
+  Edit2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -214,6 +215,13 @@ export default function App() {
   const [createUserPassword, setCreateUserPassword] = useState('');
   const [createUserRole, setCreateUserRole] = useState<'super_admin' | 'user'>('user');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
+
+  // User Editing State
+  const [isEditUserOpen, setIsEditUserOpen] = useState(false);
+  const [editingUserId, setEditingUserId] = useState('');
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserRole, setEditUserRole] = useState<'super_admin' | 'user'>('user');
+  const [isUpdatingUser, setIsUpdatingUser] = useState(false);
 
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduledDate, setScheduledDate] = useState('');
@@ -663,6 +671,29 @@ export default function App() {
     } catch (err: any) {
       console.error("Failed to send activation email:", err);
       toast.error(err.message || 'Failed to send activation email');
+    }
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editUserName || !editingUserId) {
+      toast.error('Name is required.');
+      return;
+    }
+    
+    setIsUpdatingUser(true);
+    try {
+      await setDoc(doc(db, 'users', editingUserId), {
+        displayName: editUserName,
+        role: editUserRole,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      toast.success('User updated successfully');
+      setIsEditUserOpen(false);
+    } catch (e: any) {
+      console.error("Failed to update user:", e);
+      toast.error(e.message || "Failed to update user");
+    } finally {
+      setIsUpdatingUser(false);
     }
   };
 
@@ -1420,6 +1451,7 @@ Encore Portal Admin`;
   if (!user) {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+        <Toaster position="top-right" richColors />
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1515,26 +1547,6 @@ Encore Portal Admin`;
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
-                  {!isRegistering && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!authEmail) {
-                          toast.error("Please enter your email to reset password");
-                          return;
-                        }
-                        try {
-                          await sendPasswordResetEmail(auth, authEmail);
-                          toast.success("Password reset email sent! Please check your inbox.");
-                        } catch (e: any) {
-                          toast.error(e.message || "Failed to send reset email");
-                        }
-                      }}
-                      className="text-xs text-brand-600 hover:text-brand-700 font-medium hover:underline"
-                    >
-                      Forgot password?
-                    </button>
-                  )}
                 </div>
                 <Input 
                   id="password"
@@ -1559,27 +1571,7 @@ Encore Portal Admin`;
               </Button>
             </form>
 
-            <div className="relative py-2">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-100"></div>
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-white px-2 text-gray-400">Or continue with</span>
-              </div>
-            </div>
 
-            <Button 
-              onClick={signInWithGoogle}
-              variant="outline"
-              className="w-full h-11 bg-white hover:bg-gray-50 text-gray-700 border border-gray-200 shadow-sm transition-all"
-            >
-              <img src="https://www.google.com/favicon.ico" className="w-4 h-4 mr-3" alt="Google" />
-              Google Authentication
-            </Button>
-
-            <div className="text-center font-medium text-xs text-gray-500 bg-gray-50/50 p-2.5 rounded-lg border border-gray-100/50">
-              Need access? Sign in with your corporate Google account, or contact your administrator for login credentials.
-            </div>
             
             <p className="text-[10px] text-gray-400 text-center">
               Restricted access. Authorized Encore employees only.
@@ -2882,6 +2874,71 @@ Encore Portal Admin`;
                         </DialogContent>
                       </Dialog>
 
+                      <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
+                        <DialogContent>
+                          <DialogHeader>
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <DialogTitle>Edit User Profile</DialogTitle>
+                                <DialogDescription>
+                                  Modify the name or role of this user. Changes are applied immediately.
+                                </DialogDescription>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                type="button"
+                                onClick={async () => {
+                                  const u = allUsers.find(user => user.uid === editingUserId);
+                                  if (u) {
+                                    await handleResendActivation(u.email);
+                                    setIsEditUserOpen(false);
+                                  }
+                                }}
+                                className="h-8 text-xs font-medium bg-blue-50 text-blue-700 border-blue-100 hover:bg-blue-100 hover:text-blue-800"
+                              >
+                                <Mail className="w-3.5 h-3.5 mr-2" />
+                                Send Password Reset
+                              </Button>
+                            </div>
+                          </DialogHeader>
+                          <div className="space-y-4 pt-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="editUserName">Name</Label>
+                              <Input 
+                                id="editUserName" 
+                                placeholder="E.g. John Doe"
+                                value={editUserName}
+                                onChange={(e) => setEditUserName(e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="editUserRole">Role</Label>
+                              <select 
+                                id="editUserRole"
+                                value={editUserRole}
+                                onChange={(e) => setEditUserRole(e.target.value as 'super_admin' | 'user')}
+                                className="w-full h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              >
+                                <option value="user">User</option>
+                                <option value="super_admin">Super Admin</option>
+                              </select>
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button variant="ghost" onClick={() => setIsEditUserOpen(false)}>Cancel</Button>
+                            <Button 
+                              onClick={handleUpdateUser} 
+                              disabled={isUpdatingUser}
+                              className="bg-brand-600 hover:bg-brand-700 text-white"
+                            >
+                              {isUpdatingUser ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                              Save Changes
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+
                       <Card className="border border-gray-200 overflow-hidden shadow-sm">
                         <CardContent className="p-0">
                           {loadingAllUsers && allUsers.length === 0 ? (
@@ -2994,6 +3051,22 @@ Encore Portal Admin`;
                                                       <span>Approve / Grant</span>
                                                     </>
                                                   )}
+                                                </Button>
+
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  type="button"
+                                                  onClick={() => {
+                                                    setEditingUserId(u.uid);
+                                                    setEditUserName(u.displayName);
+                                                    setEditUserRole(u.role || 'user');
+                                                    setIsEditUserOpen(true);
+                                                  }}
+                                                  className="h-8 w-8 p-0 border-brand-100 text-brand-600 hover:bg-brand-50 hover:text-brand-700 transition-colors"
+                                                  title="Edit User Info"
+                                                >
+                                                  <Edit2 className="w-3.5 h-3.5" />
                                                 </Button>
 
                                                 {(u.status === 'active' || isInvitationOnly) && (
