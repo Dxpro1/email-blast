@@ -5,7 +5,8 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  sendEmailVerification
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -36,7 +37,8 @@ export const checkConnection = async () => {
 export { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
-  sendPasswordResetEmail 
+  sendPasswordResetEmail,
+  sendEmailVerification
 };
 
 export const signInWithGoogle = async () => {
@@ -47,4 +49,19 @@ export const signInWithGoogle = async () => {
     console.error("Error signing in with Google", error);
     throw error;
   }
+};
+
+let _secondaryApp: any = null;
+export const getSecondaryAuth = () => {
+  if (!_secondaryApp) {
+    _secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstance");
+  }
+  return getAuth(_secondaryApp);
+};
+
+export const getSecondaryDb = () => {
+  if (!_secondaryApp) {
+    _secondaryApp = initializeApp(firebaseConfig, "SecondaryAppInstance");
+  }
+  return getFirestore(_secondaryApp, (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-69a653c2-f279-40ef-a977-9be443b34f45');
 };

@@ -1,5 +1,5 @@
 import express from 'express';
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { GoogleGenAI } from '@google/genai';
 import fs from 'fs';
 import path from 'path';
@@ -7,9 +7,6 @@ import path from 'path';
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// Resend initialization
-const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // Cache for the company logo to avoid fetching on every single email
 let cachedLogoBase64: string | null = null;
@@ -63,12 +60,44 @@ async function getLogoAsBase64() {
   return { base64: cachedLogoBase64, type: cachedLogoType };
 }
 
+// Nodemailer transporter initialization
+const getTransporter = () => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    return null;
+  }
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '465', 10),
+    secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+};
+
 // API Router
 const router = express.Router();
 
-router.get('/config-status', (req, res) => {
+router.get('/config-status', async (req, res) => {
+  let smtpVerify = false;
+  let smtpError = null;
+
+  try {
+    const transporter = getTransporter();
+    if (transporter) {
+      await transporter.verify();
+      smtpVerify = true;
+    }
+  } catch (error: any) {
+    smtpError = error.message || 'Verification failed';
+    console.error('SMTP test connection failed:', error);
+  }
+
   res.json({
-    hasResendKey: !!process.env.RESEND_API_KEY,
+    hasSmtpConfig: !!process.env.SMTP_HOST && !!process.env.SMTP_USER,
+    smtpWorking: smtpVerify,
+    smtpError: smtpError,
     hasGeminiKey: !!process.env.GEMINI_API_KEY
   });
 });
@@ -106,10 +135,10 @@ router.post('/generate-content', async (req, res) => {
 });
 
 router.post('/send-blast', async (req, res) => {
-  if (!process.env.RESEND_API_KEY) {
-    return res.status(500).json({ error: 'RESEND_API_KEY is not configured on the server.' });
+  const transporter = getTransporter();
+  if (!transporter) {
+    return res.status(500).json({ error: 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not fully configured on the server.' });
   }
-  const activeResend = new Resend(process.env.RESEND_API_KEY);
 
   const { messages } = req.body;
 
@@ -173,94 +202,56 @@ router.post('/send-blast', async (req, res) => {
       return res.json({ results });
     }
 
-    // Helper function for individual fallback if batch endpoint raises unexpected exceptions
-    const sendIndividualFallback = async (messagesList: any[]) => {
-      const fallbackResults = [];
-      for (const msg of messagesList) {
-        try {
-          // Apply a small sleep of 150ms to strictly avoid any rate limits of single sending
-          await new Promise(resolve => setTimeout(resolve, 150));
-          const individualRes = await activeResend.emails.send({
-            from: 'Encore <no-reply@encorefinancials.com>',
-            to: msg.to,
-            subject: msg.subject,
-            html: msg.htmlBody
-          });
+    console.log(`[send-blast] Attempting to send ${validMessages.length} valid message(s) sequentially with Nodemailer...`);
+    const smtpUser = process.env.SMTP_USER || 'no-reply@encorefinancials.com';
+    const fromName = 'Encore Leasing and Finance Corp.';
+    const fromAddress = process.env.SMTP_FROM && process.env.SMTP_FROM.includes('<') 
+      ? process.env.SMTP_FROM 
+      : { name: fromName, address: smtpUser };
 
-          if (individualRes && individualRes.error) {
-            console.error(`Resend returned error in individual fallback for ${msg.to}:`, individualRes.error);
-            fallbackResults.push({
-              to: msg.originalTo,
-              success: false,
-              id: null,
-              error: individualRes.error.message || 'Unknown Resend error'
-            });
-          } else {
-            fallbackResults.push({
-              to: msg.originalTo,
-              success: true,
-              id: individualRes?.data?.id || (individualRes as any)?.id || null,
-              error: null
-            });
-          }
-        } catch (individualErr: any) {
-          console.error(`Exception during individual fallback for ${msg.to}:`, individualErr);
-          fallbackResults.push({
+    for (const msg of validMessages) {
+      try {
+        // Apply a small sleep to strictly avoid rate limits
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        const info = await transporter.sendMail({
+          from: fromAddress,
+          replyTo: smtpUser,
+          to: msg.to,
+          subject: msg.subject,
+          text: msg.htmlBody ? msg.htmlBody.replace(/<[^>]+>/g, '') : '',
+          html: msg.htmlBody
+        });
+
+        console.log(`[send-blast] Nodemailer sending info for ${msg.to}:`, info);
+
+        if (info.rejected && info.rejected.length > 0) {
+          results.push({
             to: msg.originalTo,
             success: false,
-            id: null,
-            error: individualErr.message || String(individualErr)
+            id: info.messageId || null,
+            error: `Rejected by SMTP: ${info.response}`
+          });
+        } else {
+          results.push({
+            to: msg.originalTo,
+            success: true,
+            id: info.messageId || null,
+            error: null
           });
         }
-      }
-      return fallbackResults;
-    };
-
-    try {
-      console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
-
-      const batchPayload = validMessages.map(msg => ({
-        from: 'Encore <no-reply@encorefinancials.com>',
-        to: msg.to,
-        subject: msg.subject,
-        html: msg.htmlBody
-      }));
-
-      const batchResult = await activeResend.batch.send(batchPayload);
-
-      if (batchResult && batchResult.error) {
-        console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
-        const fallbackResults = await sendIndividualFallback(validMessages);
-        results.push(...fallbackResults);
-      } else {
-        // Success! Process each response item mapping 1-to-1
-        const batchData = batchResult?.data || [];
-        validMessages.forEach((msg, idx) => {
-          const dataItem = batchData[idx];
-          if (dataItem && dataItem.error) {
-            results.push({
-              to: msg.originalTo,
-              success: false,
-              id: null,
-              error: dataItem.error.message || 'Unknown batch item sending error'
-            });
-          } else {
-            results.push({
-              to: msg.originalTo,
-              success: true,
-              id: dataItem?.id || null,
-              error: null
-            });
-          }
+      } catch (individualErr: any) {
+        console.error(`Exception during sending for ${msg.to}:`, individualErr);
+        results.push({
+          to: msg.originalTo,
+          success: false,
+          id: null,
+          error: individualErr.message || String(individualErr)
         });
-        console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
       }
-    } catch (batchException: any) {
-      console.warn(`Resend Batch API crashed during request, activating individual fallback:`, batchException);
-      const fallbackResults = await sendIndividualFallback(validMessages);
-      results.push(...fallbackResults);
     }
 
+    console.log(`[send-blast] Send completed for ${validMessages.length} message(s).`);
     res.json({ results });
   } catch (error) {
     console.error('Blast Error:', error);

@@ -25,7 +25,8 @@ import {
   Shield,
   Lock,
   UserPlus,
-  UserCheck
+  UserCheck,
+  Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -57,7 +58,7 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { auth, db, signInWithGoogle, signInWithEmailAndPassword, createUserWithEmailAndPassword, checkConnection } from './lib/firebase';
+import { auth, db, signInWithGoogle, signInWithEmailAndPassword, createUserWithEmailAndPassword, checkConnection, getSecondaryAuth, getSecondaryDb, sendPasswordResetEmail, sendEmailVerification } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs, where } from 'firebase/firestore';
 
@@ -122,7 +123,7 @@ interface BlastHistory {
   subject: string;
   body: string;
   recipientCount: number;
-  status: 'success' | 'failed' | 'partial';
+  status: 'success' | 'failed' | 'partial' | 'in_progress' | 'scheduled';
   successCount?: number;
   failedCount?: number;
   failedContacts?: Contact[];
@@ -200,9 +201,23 @@ export default function App() {
   const [selectedHistoryRecipientIndex, setSelectedHistoryRecipientIndex] = useState<number>(0);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [configStatus, setConfigStatus] = useState<{ hasResendKey: boolean; hasGeminiKey: boolean } | null>(null);
+  const [configStatus, setConfigStatus] = useState<{ hasSmtpConfig: boolean; smtpWorking?: boolean; smtpError?: string; hasGeminiKey: boolean } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
+
+  const isSuperAdmin = userProfile?.role === 'super_admin' || user?.email?.toLowerCase() === 'encorefinancials@gmail.com';
+
+  // User Creation State
+  const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
+  const [createUserName, setCreateUserName] = useState('');
+  const [createUserEmail, setCreateUserEmail] = useState('');
+  const [createUserPassword, setCreateUserPassword] = useState('');
+  const [createUserRole, setCreateUserRole] = useState<'super_admin' | 'user'>('user');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [scheduledDate, setScheduledDate] = useState('');
+  const [isScheduling, setIsScheduling] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [importedFileName, setImportedFileName] = useState('');
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -285,6 +300,13 @@ export default function App() {
         return;
       }
 
+      if (!u.emailVerified) {
+        // Skip Firestore operations to avoid permission errors if rules enforce emailVerified
+        setCheckingProfile(false);
+        setAuthLoading(false);
+        return;
+      }
+
       setCheckingProfile(true);
 
       const isBootstrappedAdmin = u.email?.toLowerCase() === 'encorefinancials@gmail.com';
@@ -330,7 +352,7 @@ export default function App() {
           
           // Auto-update super_admin role for bootstrapped admin if not set
           if (isBootstrappedAdmin && (data.role !== 'super_admin' || data.status !== 'active')) {
-            setDoc(userDocRef, { role: 'super_admin', status: 'active' }, { merge: true }).catch(console.error);
+            setDoc(userDocRef, { role: 'super_admin', status: 'active' }, { merge: true }).catch(console.warn);
           }
           setCheckingProfile(false);
           setAuthLoading(false);
@@ -363,14 +385,18 @@ export default function App() {
             }, { merge: true })
             .then(() => {
               if (tempDocId) {
-                deleteDoc(doc(db, 'users', tempDocId)).catch(console.error);
+                deleteDoc(doc(db, 'users', tempDocId)).catch(console.warn);
               }
             })
             .catch((err) => {
-              console.error("Error writing user profile:", err);
+              console.warn("Could not write user profile automatically:", err);
+              // Set local profile so user can proceed
+              setUserProfile(initialProfile);
+              setCheckingProfile(false);
+              setAuthLoading(false);
             });
           }).catch((err) => {
-            console.error("Error querying email whitelist:", err);
+            console.warn("Querying email whitelist failed (likely rules):", err);
             // Fallback: create fresh document
             const initialProfile: AppUser = {
               uid: u.uid,
@@ -384,11 +410,36 @@ export default function App() {
               ...initialProfile,
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp()
-            }, { merge: true }).catch(console.error);
+            }, { merge: true }).then(() => {
+              setUserProfile(initialProfile);
+              setCheckingProfile(false);
+              setAuthLoading(false);
+            }).catch((e) => {
+              console.warn("Could not create fresh profile doc:", e);
+              setUserProfile(initialProfile);
+              setCheckingProfile(false);
+              setAuthLoading(false);
+            });
           });
         }
-      }, (err) => {
-        console.error("Error listening to user profile snapshots:", err);
+      }, (err: any) => {
+        console.warn("Error listening to user profile snapshots:", err);
+        // Fallback: use local or bootstrapped profile
+        const cached = localStorage.getItem(`encore_profile_${u.uid}`);
+        if (cached) {
+          try {
+            setUserProfile(JSON.parse(cached));
+          } catch (_) {}
+        } else {
+          setUserProfile({
+            uid: u.uid,
+            email: u.email,
+            displayName: u.displayName || 'Team Member',
+            photoURL: u.photoURL || '',
+            role: isBootstrappedAdmin ? 'super_admin' : 'user',
+            status: isBootstrappedAdmin ? 'active' : 'pending'
+          });
+        }
         setCheckingProfile(false);
         setAuthLoading(false);
       });
@@ -593,8 +644,6 @@ export default function App() {
 
   const formatToLongDate = (dateStr: string) => {
     if (!dateStr) return dateStr;
-    // Replace hyphens with slashes to ensure it parses neutrally in the local timezone 
-    // instead of defaulting to UTC midnight and shifting the day back
     const normalizedDateStr = dateStr.replace(/-/g, '/');
     const parsed = new Date(normalizedDateStr);
     if (isNaN(parsed.getTime())) return dateStr;
@@ -604,6 +653,103 @@ export default function App() {
       month: 'long',
       day: 'numeric'
     });
+  };
+
+  const handleResendActivation = async (email: string) => {
+    if (!email) return;
+    try {
+      await sendPasswordResetEmail(auth, email);
+      toast.success(`Password reset / activation email sent to ${email}`);
+    } catch (err: any) {
+      console.error("Failed to send activation email:", err);
+      toast.error(err.message || 'Failed to send activation email');
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!createUserName || !createUserEmail || !createUserPassword) {
+      toast.error('Name, Email, and Password are required.');
+      return;
+    }
+    if (createUserPassword.length < 6) {
+      toast.error('Password must be at least 6 characters.');
+      return;
+    }
+
+    setIsCreatingUser(true);
+    try {
+      const secAuth = getSecondaryAuth();
+      const userCredential = await createUserWithEmailAndPassword(secAuth, createUserEmail, createUserPassword);
+
+      const newUserId = userCredential.user.uid;
+      try {
+        await setDoc(doc(db, 'users', newUserId), {
+          uid: newUserId,
+          email: createUserEmail.toLowerCase(),
+          displayName: createUserName,
+          role: createUserRole,
+          status: 'active',
+          createdAt: new Date().toISOString()
+        });
+      } catch (e: any) {
+        console.warn("Could not pre-create user profile document.", e);
+        toast.error(`Database Error: ${e.message}. If this persists, please Sign Out and Sign In again.`);
+      }
+
+      const greetingLine = `Hi ${createUserName},`;
+      const emailBody = `${greetingLine}
+        
+Your new account for the Encore Leasing & Finance Corp. portal has been created.
+        
+Login URL: ${window.location.origin}
+Your Login Email: ${createUserEmail}
+Your Temporary Password: ${createUserPassword}
+        
+Please log in and change your password as soon as possible.
+        
+Warmest regards,
+Encore Portal Admin`;
+
+      const formattedHtml = emailBody.replace(/\n/g, '<br/>');
+
+      try {
+        await fetch('/api/send-blast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messages: [{
+              to: createUserEmail,
+              subject: 'Your New Account - Encore Portal',
+              body: formattedHtml
+            }]
+          })
+        });
+      } catch (err) {
+        console.error("Failed to send welcome email:", err);
+        toast.error("Account created, but failed to send welcome email.");
+      }
+
+      toast.success(`User ${createUserName} created successfully!`);
+      setIsCreateUserOpen(false);
+      setCreateUserName('');
+      setCreateUserEmail('');
+      setCreateUserPassword('');
+      setCreateUserRole('user');
+    } catch (err: any) {
+      console.error("Error creating user:", err);
+      if (err.code === 'auth/email-already-in-use') {
+        toast.error('This email is already registered.');
+      } else if (err.code === 'auth/too-many-requests') {
+        toast.error('Too many attempts. Please try again later.');
+      } else {
+        toast.error(err.message || 'Failed to create user account');
+      }
+    } finally {
+      setIsCreatingUser(false);
+      try {
+        await signOut(getSecondaryAuth());
+      } catch (e) {}
+    }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -889,16 +1035,23 @@ export default function App() {
     
     setIsAuthSubmitting(true);
     try {
+      const normalizedEmail = authEmail.toLowerCase();
       if (isRegistering) {
-        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        await createUserWithEmailAndPassword(auth, normalizedEmail, authPassword);
         toast.success("Account created!");
       } else {
-        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        await signInWithEmailAndPassword(auth, normalizedEmail, authPassword);
         toast.success("Welcome back!");
       }
     } catch (error: any) {
       console.error("Auth Error:", error);
-      toast.error(error.message || "Authentication failed");
+      if (error.code === 'auth/invalid-credential') {
+        toast.error("Invalid email or password.");
+      } else if (error.code === 'auth/too-many-requests') {
+        toast.error("Too many attempts. Please try again later.");
+      } else {
+        toast.error(error.message || "Authentication failed");
+      }
     } finally {
       setIsAuthSubmitting(false);
     }
@@ -1068,13 +1221,45 @@ export default function App() {
         };
       });
       
-      const batchSize = 100;
+      const batchSize = 25;
       const totalBatches = Math.ceil(messages.length / batchSize);
-      const delayBetweenBatches = 1000;
+      const delayBetweenBatches = 500;
       
       let failedContactsAccumulator: Contact[] = [];
       let successCountAccumulator = 0;
       const finalizedContacts: Contact[] = [];
+
+      let historyDocRef: any = null;
+      let localHistoryId = Math.random().toString(36).substring(2, 11);
+
+      // Save initial History stub
+      const initialHistoryItem = {
+        timestamp: new Date().toLocaleString(),
+        subject,
+        body,
+        recipientCount: contacts.length,
+        status: 'in_progress' as const,
+        successCount: 0,
+        failedCount: 0,
+        failedContacts: [],
+        recipients: contacts.map(c => ({ email: c.email, name: c.name })),
+        rawContacts: contacts.map(c => ({ ...c, status: 'pending' })),
+        createdAt: new Date().toISOString()
+      };
+
+      if (user) {
+        try {
+          if (dbConnected === true) {
+            const historyPath = `users/${user.uid}/history`;
+            historyDocRef = await addDoc(collection(db, historyPath), initialHistoryItem);
+          } else {
+            saveLocalHistory([{ ...initialHistoryItem, id: localHistoryId } as any, ...history]);
+          }
+        } catch (histErr) {
+          console.warn("Failed to write initial online history:", histErr);
+          saveLocalHistory([{ ...initialHistoryItem, id: localHistoryId } as any, ...history]);
+        }
+      }
 
       let toastId: string | number | undefined;
       if (messages.length > batchSize) {
@@ -1156,6 +1341,31 @@ export default function App() {
         if (i + batchSize < messages.length) {
           await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
         }
+
+        // Live update the history record
+        const liveProgressParams = {
+          successCount: successCountAccumulator,
+          failedCount: failedContactsAccumulator.length,
+          failedContacts: failedContactsAccumulator,
+          rawContacts: [
+            ...finalizedContacts,
+            ...contacts.slice(i + batchSize).map(c => ({ ...c, status: 'pending' }))
+          ]
+        };
+
+        if (historyDocRef && dbConnected) {
+          await setDoc(historyDocRef, liveProgressParams, { merge: true }).catch(console.error);
+        } else if (user) {
+          setHistory(prev => {
+            const newHist = [...prev];
+            const idx = newHist.findIndex(h => h.id === localHistoryId);
+            if (idx !== -1) {
+              newHist[idx] = { ...newHist[idx], ...liveProgressParams };
+              localStorage.setItem(`encore_history_${user.uid}`, JSON.stringify(newHist));
+            }
+            return newHist;
+          });
+        }
       }
       
       if (toastId) toast.dismiss(toastId);
@@ -1164,41 +1374,27 @@ export default function App() {
         ? ('success' as const) 
         : (successCountAccumulator === 0 ? ('failed' as const) : ('partial' as const));
 
-      // Save to Firestore History
-      const historyItem = {
-        timestamp: new Date().toLocaleString(),
-        subject,
-        body,
-        recipientCount: contacts.length,
+      // Final History update
+      const finalHistoryUpdate = {
         status: computedCampaignStatus,
         successCount: successCountAccumulator,
         failedCount: failedContactsAccumulator.length,
         failedContacts: failedContactsAccumulator,
-        recipients: contacts.map(c => ({ email: c.email, name: c.name })),
-        rawContacts: finalizedContacts,
-        createdAt: new Date().toISOString()
+        rawContacts: finalizedContacts
       };
 
-      if (user) {
-        try {
-          if (dbConnected === true) {
-            const historyPath = `users/${user.uid}/history`;
-            await addDoc(collection(db, historyPath), historyItem);
-          } else {
-            const localHistItem = {
-              id: Math.random().toString(36).substring(2, 11),
-              ...historyItem
-            };
-            saveLocalHistory([localHistItem, ...history]);
+      if (historyDocRef && dbConnected) {
+        await setDoc(historyDocRef, finalHistoryUpdate, { merge: true }).catch(console.error);
+      } else if (user) {
+        setHistory(prev => {
+          const newHist = [...prev];
+          const idx = newHist.findIndex(h => h.id === localHistoryId);
+          if (idx !== -1) {
+            newHist[idx] = { ...newHist[idx], ...finalHistoryUpdate };
+            localStorage.setItem(`encore_history_${user.uid}`, JSON.stringify(newHist));
           }
-        } catch (histErr) {
-          console.warn("Failed to write to online history, saving locally:", histErr);
-          const localHistItem = {
-            id: Math.random().toString(36).substring(2, 11),
-            ...historyItem
-          };
-          saveLocalHistory([localHistItem, ...history]);
-        }
+          return newHist;
+        });
       }
 
       toast.success(`Blast sent to ${contacts.length} recipients!`);
@@ -1317,7 +1513,29 @@ export default function App() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="password">Password</Label>
+                  {!isRegistering && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!authEmail) {
+                          toast.error("Please enter your email to reset password");
+                          return;
+                        }
+                        try {
+                          await sendPasswordResetEmail(auth, authEmail);
+                          toast.success("Password reset email sent! Please check your inbox.");
+                        } catch (e: any) {
+                          toast.error(e.message || "Failed to send reset email");
+                        }
+                      }}
+                      className="text-xs text-brand-600 hover:text-brand-700 font-medium hover:underline"
+                    >
+                      Forgot password?
+                    </button>
+                  )}
+                </div>
                 <Input 
                   id="password"
                   type="password" 
@@ -1366,6 +1584,71 @@ export default function App() {
             <p className="text-[10px] text-gray-400 text-center">
               Restricted access. Authorized Encore employees only.
             </p>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  const handleSendVerificationInfo = async () => {
+    try {
+      if (user) {
+        await sendEmailVerification(user);
+        toast.success("Verification email sent! Please check your inbox.");
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to send email.");
+    }
+  };
+
+  if (user && !user.emailVerified) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
+        <Toaster position="top-right" richColors />
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
+        >
+          <div className="bg-orange-500 p-8 flex flex-col items-center justify-center text-center">
+            <Mail className="w-12 h-12 text-white animate-bounce mb-3" />
+            <h1 className="text-2xl font-bold text-white">
+              Verify Your Email
+            </h1>
+            <p className="text-orange-100 text-xs mt-1.5 uppercase font-semibold tracking-wider">
+              Verification Required
+            </p>
+          </div>
+          
+          <div className="p-8 space-y-6">
+            <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
+              <div className="border-t border-gray-100 pt-3 text-xs text-gray-600 space-y-2 leading-relaxed text-center">
+                <p>
+                  To secure your portal, you must verify your email address. 
+                  Please check your inbox at <strong>{user.email}</strong> and click the verification link.
+                </p>
+                <p className="text-[11px] text-gray-400 italic">
+                  Once verified, simply reload this page to access the portal.
+                </p>
+              </div>
+            </div>
+
+            <Button
+              onClick={handleSendVerificationInfo}
+              className="w-full h-11 bg-orange-600 hover:bg-orange-700 text-white font-medium transition-all"
+            >
+              <Send className="w-4 h-4 mr-2" />
+              Resend Verification Email
+            </Button>
+
+            <Button
+              onClick={() => signOut(auth)}
+              variant="outline"
+              className="w-full h-11 border-gray-200 text-gray-700 hover:bg-gray-50 font-medium transition-all"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              Sign Out / Switch Account
+            </Button>
           </div>
         </motion.div>
       </div>
@@ -1505,10 +1788,10 @@ export default function App() {
                   </Button>
                 </div>
               )}
-            {configStatus && !configStatus.hasResendKey && (
+            {configStatus && (!configStatus.hasSmtpConfig || !configStatus.smtpWorking) && (
               <Badge variant="destructive" className="animate-pulse">
                 <AlertCircle className="w-3 h-3 mr-1" />
-                Missing Resend Key
+                {!configStatus.hasSmtpConfig ? 'Missing SMTP Config' : 'SMTP Error'}
               </Badge>
             )}
             <div className="flex items-center gap-3 pl-6 border-l border-gray-100">
@@ -1550,7 +1833,7 @@ export default function App() {
                 <History className="w-4 h-4 mr-2" />
                 History
               </TabsTrigger>
-              {userProfile?.role === 'super_admin' && (
+              {isSuperAdmin && (
                 <TabsTrigger value="admin" className="px-6 data-[state=active]:bg-brand-50 data-[state=active]:text-brand-700">
                   <Shield className="w-4 h-4 mr-2" />
                   Admin Panel
@@ -1559,14 +1842,114 @@ export default function App() {
             </TabsList>
             
             {contacts.length > 0 && (
+              <div className="flex gap-2">
               <Button 
                 onClick={sendBlast} 
-                disabled={isSending || !subject || !body}
-                className="bg-brand-600 hover:bg-brand-700 text-white px-8 shadow-lg shadow-brand-200 transition-all active:scale-95"
+                disabled={isSending || isScheduling || !subject || !body}
+                className="bg-brand-600 hover:bg-brand-700 text-white px-6 shadow-lg shadow-brand-200 transition-all active:scale-95"
               >
                 {isSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                Send Blast Now
+                Send Now
               </Button>
+              <Dialog open={isScheduleOpen} onOpenChange={setIsScheduleOpen}>
+                <DialogTrigger render={
+                  <Button 
+                    variant="outline"
+                    disabled={isSending || isScheduling || !subject || !body}
+                    className="border-brand-200 text-brand-700 hover:bg-brand-50 shadow-sm"
+                  >
+                    Schedule
+                  </Button>
+                } />
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Schedule Campaign</DialogTitle>
+                    <DialogDescription>
+                      Select a date and time to send this email blast.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <Label htmlFor="schedule-time" className="mb-2 block text-sm font-medium">Select Date & Time</Label>
+                    <input 
+                      type="datetime-local" 
+                      id="schedule-time"
+                      value={scheduledDate}
+                      onChange={(e) => setScheduledDate(e.target.value)}
+                      className="w-full flex h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                      min={new Date().toISOString().slice(0, 16)}
+                      required
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button variant="ghost" onClick={() => setIsScheduleOpen(false)}>Cancel</Button>
+                    <Button 
+                      className="bg-brand-600 hover:bg-brand-700 text-white"
+                      disabled={!scheduledDate || isScheduling}
+                      onClick={async () => {
+                        if (!scheduledDate) return;
+                        setIsScheduling(true);
+                        try {
+                          const messages = contacts.map(contact => {
+                            const personalizedBody = replacePlaceholders(body, contact);
+                            const personalizedSubject = replacePlaceholders(subject, contact);
+                            const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
+                            return {
+                              to: [contact.email],
+                              subject: personalizedSubject,
+                              body: htmlBody
+                            };
+                          });
+
+                          const response = await fetch('/api/schedule-blast', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              messages,
+                              scheduledFor: new Date(scheduledDate).toISOString()
+                            })
+                          });
+
+                          const data = await response.json();
+                          if (!response.ok) throw new Error(data.error || 'Failed to schedule');
+                          
+                          toast.success('Campaign scheduled successfully!');
+                          setIsScheduleOpen(false);
+                          
+                          // Save history stub
+                          const historyItem = {
+                            timestamp: new Date().toLocaleString(),
+                            subject,
+                            body,
+                            recipientCount: contacts.length,
+                            status: 'scheduled' as const,
+                            successCount: 0,
+                            failedCount: 0,
+                            failedContacts: [],
+                            recipients: contacts.map(c => ({ email: c.email, name: c.name })),
+                            rawContacts: contacts,
+                            createdAt: new Date().toISOString(),
+                            scheduledFor: new Date(scheduledDate).toISOString()
+                          };
+
+                          if (user && dbConnected) {
+                            const historyPath = `users/${user.uid}/history`;
+                            await addDoc(collection(db, historyPath), historyItem);
+                          }
+                          
+                        } catch (err: any) {
+                          toast.error(err.message || 'Failed to schedule campaign');
+                        } finally {
+                          setIsScheduling(false);
+                        }
+                      }}
+                    >
+                        {isScheduling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                        Confirm Schedule
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              </div>
             )}
           </div>
 
@@ -1988,24 +2371,27 @@ export default function App() {
                 </div>
 
                 <div className="space-y-6">
-                  {configStatus && !configStatus.hasResendKey && (
+                  {configStatus && (!configStatus.hasSmtpConfig || !configStatus.smtpWorking) && (
                     <Card className="border-red-200 bg-red-50">
                       <CardHeader className="pb-2">
                         <CardTitle className="text-red-800 text-sm flex items-center">
                           <AlertCircle className="w-4 h-4 mr-2" />
-                          Configuration Required
+                          {!configStatus.hasSmtpConfig ? 'Configuration Required' : 'SMTP Connection Failed'}
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
                         <p className="text-xs text-red-700 leading-relaxed">
-                          Your <strong>RESEND_API_KEY</strong> is missing. Emails cannot be sent until you add this key to the <strong>Secrets</strong> panel in AI Studio settings.
+                          {!configStatus.hasSmtpConfig 
+                            ? <>Your <strong>SMTP credentials</strong> are missing. Emails cannot be sent until you supply <strong>SMTP_HOST</strong>, <strong>SMTP_USER</strong>, and <strong>SMTP_PASS</strong> keys to the <strong>Secrets</strong> panel in AI Studio settings.</>
+                            : <>Your <strong>SMTP credentials</strong> are configured but the connection failed. Error: {configStatus.smtpError || 'Unknown Error'}. Please check your Hostinger credentials.</>
+                          }
                         </p>
                         <Button 
                           variant="link" 
                           className="text-xs p-0 h-auto text-red-800 font-bold mt-2"
-                          onClick={() => window.open('https://resend.com', '_blank')}
+                          onClick={() => window.open('https://hostinger.com', '_blank')}
                         >
-                          Get a free key at Resend.com →
+                          Configure your Hostinger SMTP →
                         </Button>
                       </CardContent>
                     </Card>
@@ -2024,7 +2410,7 @@ export default function App() {
                       <div className="space-y-2">
                         <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Preview</p>
                         <div className="p-4 bg-gray-50 rounded-lg border border-gray-100 text-sm">
-                          <p className="font-bold mb-1">From: <span className="font-normal text-gray-500">Encore &lt;no-reply@encorefinancials.com&gt;</span></p>
+                          <p className="font-bold mb-1">From: <span className="font-normal text-gray-500">Encore Leasing and Finance Corp. &lt;no-reply@encorefinancials.com&gt;</span></p>
                           <p className="font-bold mb-1">To: <span className="font-normal text-gray-500">Selected Contacts</span></p>
                           <p className="font-bold">Subject: <span className="font-normal text-gray-500">{subject || '(No subject)'}</span></p>
                         </div>
@@ -2032,7 +2418,7 @@ export default function App() {
                       
                       <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg">
                         <p className="text-[10px] text-amber-800 leading-tight">
-                          <strong>Note:</strong> If using the default Resend testing domain, you can only send emails to the address you used to sign up for Resend.
+                          <strong>Note:</strong> Campaign is configured to send via Hostinger SMTP. Please monitor your daily sending limits.
                         </p>
                       </div>
                     </CardContent>
@@ -2245,6 +2631,16 @@ export default function App() {
                                       <AlertTriangle className="w-3 h-3 mr-1" />
                                       Partial Success
                                     </Badge>
+                                  ) : item.status === 'in_progress' ? (
+                                    <Badge className="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 items-center whitespace-nowrap">
+                                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                      {item.recipientCount > 0 ? `${(item.successCount || 0) + (item.failedCount || 0)} / ${item.recipientCount} - ${Math.round(((item.successCount || 0) + (item.failedCount || 0)) / item.recipientCount * 100)}%` : 'In Progress'}
+                                    </Badge>
+                                  ) : item.status === 'scheduled' ? (
+                                    <Badge className="bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 items-center">
+                                      <Calendar className="w-3 h-3 mr-1" />
+                                      Scheduled
+                                    </Badge>
                                   ) : (
                                     <Badge className="bg-red-50 text-red-700 border-red-200 hover:bg-red-100">
                                       <AlertTriangle className="w-3 h-3 mr-1" />
@@ -2274,7 +2670,7 @@ export default function App() {
               </motion.div>
             </TabsContent>
 
-            {userProfile?.role === 'super_admin' && (
+            {isSuperAdmin && (
               <TabsContent value="admin" key="admin-content">
                 <motion.div
                   initial={{ opacity: 0, y: 15 }}
@@ -2397,20 +2793,94 @@ export default function App() {
                     {/* Manage Registered / Whitelisted Users Grid */}
                     <div className="lg:col-span-2 space-y-6">
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-xl border border-gray-200">
-                        <div className="relative w-full sm:max-w-xs">
-                          <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
-                          <Input
-                            type="search"
-                            placeholder="Filter members..."
-                            value={userSearchQuery}
-                            onChange={(e) => setUserSearchQuery(e.target.value)}
-                            className="pl-9 h-10 w-full"
-                          />
+                        <div className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto">
+                          <div className="relative w-full sm:w-64">
+                            <Search className="absolute left-3 top-3 w-4 h-4 text-gray-400" />
+                            <Input
+                              type="search"
+                              placeholder="Filter members..."
+                              value={userSearchQuery}
+                              onChange={(e) => setUserSearchQuery(e.target.value)}
+                              className="pl-9 h-10 w-full"
+                            />
+                          </div>
+                          <Button 
+                            onClick={() => setIsCreateUserOpen(true)}
+                            className="bg-brand-600 hover:bg-brand-700 text-white shadow-sm"
+                          >
+                            <UserPlus className="w-4 h-4 mr-2" />
+                            Create User
+                          </Button>
                         </div>
-                        <span className="text-xs font-semibold text-gray-500">
+                        <span className="text-xs font-semibold text-gray-500 hidden sm:inline-block">
                           Showing {filteredUsers.length} of {allUsers.length} total profiles
                         </span>
                       </div>
+
+                      <Dialog open={isCreateUserOpen} onOpenChange={setIsCreateUserOpen}>
+                        <DialogContent>
+                          <DialogHeader>
+                            <DialogTitle>Create New User</DialogTitle>
+                            <DialogDescription>
+                              Directly create a user account and send an invite email.
+                            </DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                              <Label htmlFor="createUserName">Full Name</Label>
+                              <Input
+                                id="createUserName"
+                                placeholder="Juan Dela Cruz"
+                                value={createUserName}
+                                onChange={(e) => setCreateUserName(e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="createUserEmail">Email Address</Label>
+                              <Input
+                                id="createUserEmail"
+                                type="email"
+                                placeholder="juan@encorefinancials.com"
+                                value={createUserEmail}
+                                onChange={(e) => setCreateUserEmail(e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="createUserPassword">Temporary Password</Label>
+                              <Input
+                                id="createUserPassword"
+                                type="text"
+                                placeholder="Min 6 characters"
+                                value={createUserPassword}
+                                onChange={(e) => setCreateUserPassword(e.target.value)}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="createUserRole">Role</Label>
+                              <select 
+                                id="createUserRole"
+                                value={createUserRole}
+                                onChange={(e) => setCreateUserRole(e.target.value as 'super_admin' | 'user')}
+                                className="w-full h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              >
+                                <option value="user">User</option>
+                                <option value="super_admin">Super Admin</option>
+                              </select>
+                            </div>
+                          </div>
+                          <DialogFooter>
+                            <Button variant="ghost" onClick={() => setIsCreateUserOpen(false)}>Cancel</Button>
+                            <Button 
+                              onClick={handleCreateUser} 
+                              disabled={isCreatingUser}
+                              className="bg-brand-600 hover:bg-brand-700 text-white"
+                            >
+                              {isCreatingUser ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                              Create Account
+                            </Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
 
                       <Card className="border border-gray-200 overflow-hidden shadow-sm">
                         <CardContent className="p-0">
@@ -2525,6 +2995,19 @@ export default function App() {
                                                     </>
                                                   )}
                                                 </Button>
+
+                                                {(u.status === 'active' || isInvitationOnly) && (
+                                                  <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    type="button"
+                                                    onClick={() => handleResendActivation(u.email)}
+                                                    className="h-8 w-8 p-0 border-blue-100 text-blue-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
+                                                    title={isInvitationOnly ? "Resend Invitation Email" : "Send Password Reset"}
+                                                  >
+                                                    <Mail className="w-3.5 h-3.5" />
+                                                  </Button>
+                                                )}
                                                 
                                                 <Button
                                                   variant="outline"
@@ -2587,6 +3070,16 @@ export default function App() {
                       <AlertTriangle className="w-3 h-3 mr-1" />
                       Partial Success
                     </Badge>
+                  ) : selectedHistory?.status === 'in_progress' ? (
+                    <Badge className="bg-blue-50 text-blue-700 border-blue-200 items-center whitespace-nowrap">
+                      <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                      {selectedHistory?.recipientCount && selectedHistory.recipientCount > 0 ? `${(selectedHistory.successCount || 0) + (selectedHistory.failedCount || 0)} / ${selectedHistory.recipientCount} - ${Math.round(((selectedHistory.successCount || 0) + (selectedHistory.failedCount || 0)) / selectedHistory.recipientCount * 100)}%` : 'In Progress'}
+                    </Badge>
+                  ) : selectedHistory?.status === 'scheduled' ? (
+                    <Badge className="bg-purple-50 text-purple-700 border-purple-200 items-center">
+                      <Calendar className="w-3 h-3 mr-1" />
+                      Scheduled
+                    </Badge>
                   ) : (
                     <Badge className="bg-red-50 text-red-700 border-red-200">
                       <AlertTriangle className="w-3 h-3 mr-1" />
@@ -2605,8 +3098,9 @@ export default function App() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={[
-                        { name: 'Sent', value: selectedHistory?.successCount ?? selectedHistory?.recipientCount ?? 0, color: '#16a34a' }, // green-600
-                        { name: 'Failed', value: selectedHistory?.failedCount ?? 0, color: '#dc2626' } // red-600
+                        { name: 'Sent', value: selectedHistory?.successCount ?? (selectedHistory?.status === 'success' ? selectedHistory.recipientCount : 0), color: '#16a34a' }, // green-600
+                        { name: 'Failed', value: selectedHistory?.failedCount ?? 0, color: '#dc2626' }, // red-600
+                        ...(selectedHistory?.status === 'in_progress' || selectedHistory?.status === 'scheduled' ? [{ name: 'Pending', value: (selectedHistory.recipientCount || 0) - (selectedHistory?.successCount || 0) - (selectedHistory?.failedCount || 0), color: '#9ca3af' }] : [])
                       ]}
                       layout="vertical"
                       margin={{ top: 0, right: 20, left: -20, bottom: 0 }}
@@ -2620,8 +3114,9 @@ export default function App() {
                       <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
                         {
                           [
-                            { name: 'Sent', value: selectedHistory?.successCount ?? selectedHistory?.recipientCount ?? 0, color: '#16a34a' },
-                            { name: 'Failed', value: selectedHistory?.failedCount ?? 0, color: '#dc2626' }
+                            { name: 'Sent', value: selectedHistory?.successCount ?? (selectedHistory?.status === 'success' ? selectedHistory?.recipientCount : 0), color: '#16a34a' },
+                            { name: 'Failed', value: selectedHistory?.failedCount ?? 0, color: '#dc2626' },
+                            ...(selectedHistory?.status === 'in_progress' || selectedHistory?.status === 'scheduled' ? [{ name: 'Pending', value: (selectedHistory.recipientCount || 0) - (selectedHistory?.successCount || 0) - (selectedHistory?.failedCount || 0), color: '#9ca3af' }] : [])
                           ].map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
                           ))

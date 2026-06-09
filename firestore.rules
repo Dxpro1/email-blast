@@ -9,7 +9,7 @@ service cloud.firestore {
 
     // 1. Global Helpers
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null;
     }
 
     function isOwner(userId) {
@@ -17,7 +17,7 @@ service cloud.firestore {
     }
 
     function isSuperAdmin() {
-      return isSignedIn() && request.auth.token.email.toLowerCase() == 'encorefinancials@gmail.com';
+      return isSignedIn() && request.auth.token.email == 'encorefinancials@gmail.com';
     }
 
     function isValidId(id) {

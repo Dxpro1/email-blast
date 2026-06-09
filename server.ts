@@ -2,9 +2,10 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
+import cron from 'node-cron';
 
 dotenv.config();
 
@@ -15,8 +16,21 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-  // Resend initialization
-  const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+  // Nodemailer transporter initialization
+  const getTransporter = () => {
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+      return null;
+    }
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '465', 10),
+      secure: process.env.SMTP_PORT === '465', // true for 465, false for other ports
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+  };
 
   // Cache for the company logo to avoid fetching on every single email
   let cachedLogoBase64: string | null = null;
@@ -74,9 +88,25 @@ async function startServer() {
   getLogoAsBase64();
 
   // API Routes
-  app.get('/api/config-status', (req, res) => {
+  app.get('/api/config-status', async (req, res) => {
+    let smtpVerify = false;
+    let smtpError = null;
+
+    try {
+      const transporter = getTransporter();
+      if (transporter) {
+        await transporter.verify();
+        smtpVerify = true;
+      }
+    } catch (error: any) {
+      smtpError = error.message || 'Verification failed';
+      console.error('SMTP test connection failed:', error);
+    }
+
     res.json({
-      hasResendKey: !!process.env.RESEND_API_KEY,
+      hasSmtpConfig: !!process.env.SMTP_HOST && !!process.env.SMTP_USER,
+      smtpWorking: smtpVerify,
+      smtpError: smtpError,
       hasGeminiKey: !!process.env.GEMINI_API_KEY
     });
   });
@@ -113,11 +143,198 @@ async function startServer() {
     }
   });
 
-  app.post('/api/send-blast', async (req, res) => {
-    if (!process.env.RESEND_API_KEY) {
-      return res.status(500).json({ error: 'RESEND_API_KEY is not configured on the server.' });
+const SCHEDULED_JOBS_FILE = path.join(process.cwd(), 'scheduled_jobs.json');
+
+function loadScheduledJobs(): any[] {
+  try {
+    if (fs.existsSync(SCHEDULED_JOBS_FILE)) {
+      return JSON.parse(fs.readFileSync(SCHEDULED_JOBS_FILE, 'utf-8'));
     }
-    const activeResend = new Resend(process.env.RESEND_API_KEY);
+  } catch (err) {
+    console.error('Error loading scheduled jobs:', err);
+  }
+  return [];
+}
+
+function saveScheduledJobs(jobs: any[]) {
+  try {
+    fs.writeFileSync(SCHEDULED_JOBS_FILE, JSON.stringify(jobs, null, 2));
+  } catch (err) {
+    console.error('Error saving scheduled jobs:', err);
+  }
+}
+
+async function processEmailMessages(transporter: any, messages: any[]): Promise<any[]> {
+  const results: any[] = [];
+  const validMessages: any[] = [];
+
+  for (const msg of messages) {
+    let recipient = '';
+    if (Array.isArray(msg.to)) {
+      recipient = typeof msg.to[0] === 'string' ? msg.to[0].trim() : '';
+    } else if (typeof msg.to === 'string') {
+      recipient = msg.to.trim();
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!recipient || !emailRegex.test(recipient)) {
+      console.warn(`[send-blast/schedule] Skipping invalid email address: ${recipient || 'empty'}`);
+      results.push({
+        to: msg.to || recipient,
+        success: false,
+        id: null,
+        error: 'Invalid or empty email address format'
+      });
+      continue;
+    }
+
+    let emailHtml = msg.body;
+    const possibleUrls = [
+      'https://encorefinancials.com/assets/images/application-settings/logo-dark.png',
+      'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+      '/assets/img/logo.png',
+      '/assets/img/logo.svg',
+      'logo.png',
+      'logo.svg'
+    ];
+    
+    for (const url of possibleUrls) {
+      if (emailHtml.includes(url)) {
+        emailHtml = emailHtml.split(url).join('https://encorefinancials.com/assets/images/application-settings/logo-dark.png');
+      }
+    }
+
+    validMessages.push({
+      to: recipient,
+      subject: msg.subject,
+      htmlBody: emailHtml,
+      originalTo: msg.to
+    });
+  }
+
+  if (validMessages.length === 0) {
+    return results;
+  }
+
+  console.log(`Attempting to send ${validMessages.length} valid message(s) sequentially with Nodemailer...`);
+  const smtpUser = process.env.SMTP_USER || 'no-reply@encorefinancials.com';
+  const fromName = 'Encore Leasing and Finance Corp.';
+  const fromAddress = process.env.SMTP_FROM && process.env.SMTP_FROM.includes('<') 
+    ? process.env.SMTP_FROM 
+    : { name: fromName, address: smtpUser };
+
+  for (const msg of validMessages) {
+    try {
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      const info = await transporter.sendMail({
+        from: fromAddress,
+        replyTo: smtpUser,
+        to: msg.to,
+        subject: msg.subject,
+        text: msg.htmlBody ? msg.htmlBody.replace(/<[^>]+>/g, '') : '',
+        html: msg.htmlBody
+      });
+
+      console.log(`Nodemailer sending info for ${msg.to}:`, info);
+
+      if (info.rejected && info.rejected.length > 0) {
+        results.push({
+          to: msg.originalTo,
+          success: false,
+          id: info.messageId || null,
+          error: `Rejected by SMTP: ${info.response}`
+        });
+      } else {
+        results.push({
+          to: msg.originalTo,
+          success: true,
+          id: info.messageId || null,
+          error: null
+        });
+      }
+    } catch (individualErr: any) {
+      console.error(`Exception during sending for ${msg.to}:`, individualErr);
+      results.push({
+        to: msg.originalTo,
+        success: false,
+        id: null,
+        error: individualErr.message || String(individualErr)
+      });
+    }
+  }
+
+  return results;
+}
+
+  // Cron job to process scheduled blasts
+  cron.schedule('* * * * *', async () => {
+    const jobs = loadScheduledJobs();
+    const now = new Date();
+    let madeChanges = false;
+    
+    for (const job of jobs) {
+      if (job.status === 'pending' && new Date(job.scheduledFor) <= now) {
+        console.log(`Processing scheduled job ${job.id}...`);
+        job.status = 'processing';
+        saveScheduledJobs(jobs); // Persist immediately so another tick doesn't pick it up
+        
+        try {
+          const transporter = getTransporter();
+          if (transporter) {
+            const results = await processEmailMessages(transporter, job.messages);
+            job.status = 'completed';
+            job.results = results;
+          } else {
+            job.status = 'failed';
+            job.error = 'SMTP credentials not configured';
+          }
+        } catch (err: any) {
+          console.error(`Error processing scheduled job ${job.id}:`, err);
+          job.status = 'failed';
+          job.error = err.message;
+        }
+        
+        job.processedAt = new Date().toISOString();
+        madeChanges = true;
+      }
+    }
+    
+    if (madeChanges) {
+      saveScheduledJobs(jobs);
+    }
+  });
+
+  app.post('/api/schedule-blast', async (req, res) => {
+    const { messages, scheduledFor } = req.body;
+    
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'No messages provided.' });
+    }
+    if (!scheduledFor) {
+      return res.status(400).json({ error: 'No scheduledFor time provided.' });
+    }
+    
+    const jobs = loadScheduledJobs();
+    const newJob = {
+      id: Math.random().toString(36).substring(2, 15) + Date.now().toString(36),
+      createdAt: new Date().toISOString(),
+      scheduledFor,
+      messages,
+      status: 'pending'
+    };
+    
+    jobs.push(newJob);
+    saveScheduledJobs(jobs);
+    
+    res.json({ success: true, jobId: newJob.id, scheduledFor: newJob.scheduledFor });
+  });
+
+  app.post('/api/send-blast', async (req, res) => {
+    const transporter = getTransporter();
+    if (!transporter) {
+      return res.status(500).json({ error: 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not fully configured on the server.' });
+    }
 
     const { messages } = req.body;
 
@@ -126,149 +343,7 @@ async function startServer() {
     }
 
     try {
-      const results: any[] = [];
-      const validMessages: any[] = [];
-
-      // 1. Process, validate, and sanitize each message
-      for (const msg of messages) {
-        let recipient = '';
-        if (Array.isArray(msg.to)) {
-          recipient = typeof msg.to[0] === 'string' ? msg.to[0].trim() : '';
-        } else if (typeof msg.to === 'string') {
-          recipient = msg.to.trim();
-        }
-
-        // Clean email format regex validation
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!recipient || !emailRegex.test(recipient)) {
-          console.warn(`[send-blast] Skipping invalid email address: ${recipient || 'empty'}`);
-          results.push({
-            to: msg.to || recipient,
-            success: false,
-            id: null,
-            error: 'Invalid or empty email address format'
-          });
-          continue;
-        }
-
-        // Clean output HTML body to replace relative paths with hosted logo URL
-        let emailHtml = msg.body;
-        const possibleUrls = [
-          'https://encorefinancials.com/assets/images/application-settings/logo-dark.png',
-          'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
-          '/assets/img/logo.png',
-          '/assets/img/logo.svg',
-          'logo.png',
-          'logo.svg'
-        ];
-        
-        for (const url of possibleUrls) {
-          if (emailHtml.includes(url)) {
-            emailHtml = emailHtml.split(url).join('https://encorefinancials.com/assets/images/application-settings/logo-dark.png');
-          }
-        }
-
-        validMessages.push({
-          to: recipient,
-          subject: msg.subject,
-          htmlBody: emailHtml,
-          originalTo: msg.to
-        });
-      }
-
-      // If no valid messages left to send, return immediately
-      if (validMessages.length === 0) {
-        return res.json({ results });
-      }
-
-      // Helper function for individual fallback if batch endpoint raises unexpected exceptions
-      const sendIndividualFallback = async (messagesList: any[]) => {
-        const fallbackResults = [];
-        for (const msg of messagesList) {
-          try {
-            // Apply a small sleep of 150ms to strictly avoid any rate limits of single sending
-            await new Promise(resolve => setTimeout(resolve, 150));
-            const individualRes = await activeResend.emails.send({
-              from: 'Encore <no-reply@encorefinancials.com>',
-              to: msg.to,
-              subject: msg.subject,
-              html: msg.htmlBody
-            });
-
-            if (individualRes && individualRes.error) {
-              console.error(`Resend returned error in individual fallback for ${msg.to}:`, individualRes.error);
-              fallbackResults.push({
-                to: msg.originalTo,
-                success: false,
-                id: null,
-                error: individualRes.error.message || 'Unknown Resend error'
-              });
-            } else {
-              fallbackResults.push({
-                to: msg.originalTo,
-                success: true,
-                id: individualRes?.data?.id || (individualRes as any)?.id || null,
-                error: null
-              });
-            }
-          } catch (individualErr: any) {
-            console.error(`Exception during individual fallback for ${msg.to}:`, individualErr);
-            fallbackResults.push({
-              to: msg.originalTo,
-              success: false,
-              id: null,
-              error: individualErr.message || String(individualErr)
-            });
-          }
-        }
-        return fallbackResults;
-      };
-
-      try {
-        console.log(`[send-blast] Attempting batch send for ${validMessages.length} valid message(s)...`);
-
-        const batchPayload = validMessages.map(msg => ({
-          from: 'Encore <no-reply@encorefinancials.com>',
-          to: msg.to,
-          subject: msg.subject,
-          html: msg.htmlBody
-        }));
-
-        const batchResult = await activeResend.batch.send(batchPayload);
-
-        if (batchResult && batchResult.error) {
-          console.warn(`Resend Batch API returned error, activating individual fallback:`, batchResult.error);
-          const fallbackResults = await sendIndividualFallback(validMessages);
-          results.push(...fallbackResults);
-        } else {
-          // Success! Process each response item mapping 1-to-1
-          const batchData = batchResult?.data || [];
-          validMessages.forEach((msg, idx) => {
-            const dataItem = batchData[idx];
-            if (dataItem && dataItem.error) {
-              results.push({
-                to: msg.originalTo,
-                success: false,
-                id: null,
-                error: dataItem.error.message || 'Unknown batch item sending error'
-              });
-            } else {
-              results.push({
-                to: msg.originalTo,
-                success: true,
-                id: dataItem?.id || null,
-                error: null
-              });
-            }
-          });
-          console.log(`[send-blast] Batch send completed successfully for ${validMessages.length} message(s).`);
-        }
-      } catch (batchException: any) {
-        console.warn(`Resend Batch API crashed during request, activating individual fallback:`, batchException);
-        const fallbackResults = await sendIndividualFallback(validMessages);
-        results.push(...fallbackResults);
-      }
-
+      const results = await processEmailMessages(transporter, messages);
       res.json({ results });
     } catch (error) {
       console.error('Blast Error:', error);
