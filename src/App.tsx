@@ -1942,7 +1942,7 @@ Encore Portal Admin`;
             {configStatus && (!configStatus.hasSmtpConfig || !configStatus.smtpWorking) && (
               <Badge variant="destructive" className="animate-pulse">
                 <AlertCircle className="w-3 h-3 mr-1" />
-                {!configStatus.hasSmtpConfig ? 'Missing SMTP Config' : 'SMTP Error'}
+                {!configStatus.hasSmtpConfig ? 'Missing API Key' : 'API Error'}
               </Badge>
             )}
             <div className="flex items-center gap-3 pl-6 border-l border-gray-100">
@@ -2677,7 +2677,7 @@ Encore Portal Admin`;
                         <Button 
                           variant="link" 
                           className="text-xs p-0 h-auto text-red-800 font-bold mt-2"
-                          onClick={() => window.open('https://app.brevo.com/settings/keys/smtp', '_blank')}
+                          onClick={() => window.open('https://app.brevo.com/settings/keys/api', '_blank')}
                         >
                           Configure your Brevo API Key →
                         </Button>
