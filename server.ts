@@ -89,24 +89,10 @@ async function startServer() {
 
   // API Routes
   app.get('/api/config-status', async (req, res) => {
-    let smtpVerify = false;
-    let smtpError = null;
-
-    try {
-      const transporter = getTransporter();
-      if (transporter) {
-        await transporter.verify();
-        smtpVerify = true;
-      }
-    } catch (error: any) {
-      smtpError = error.message || 'Verification failed';
-      console.error('SMTP test connection failed:', error);
-    }
-
     res.json({
-      hasSmtpConfig: !!process.env.SMTP_HOST && !!process.env.SMTP_USER,
-      smtpWorking: smtpVerify,
-      smtpError: smtpError,
+      hasSmtpConfig: !!process.env.BREVO_API_KEY,
+      smtpWorking: !!process.env.BREVO_API_KEY,
+      smtpError: null,
       hasGeminiKey: !!process.env.GEMINI_API_KEY
     });
   });
@@ -164,7 +150,7 @@ function saveScheduledJobs(jobs: any[]) {
   }
 }
 
-async function processEmailMessages(transporter: any, messages: any[]): Promise<any[]> {
+async function processEmailMessages(apiKey: string, messages: any[]): Promise<any[]> {
   const results: any[] = [];
   const validMessages: any[] = [];
 
@@ -216,41 +202,46 @@ async function processEmailMessages(transporter: any, messages: any[]): Promise<
     return results;
   }
 
-  console.log(`Attempting to send ${validMessages.length} valid message(s) sequentially with Nodemailer...`);
-  const smtpUser = process.env.SMTP_USER || 'no-reply@encorefinancials.com';
+  console.log(`Attempting to send ${validMessages.length} valid message(s) via Brevo API...`);
   const fallbackSenderAddress = 'no-reply@encorefinancials.com';
   const fromName = 'Encore Leasing and Finance Corp.';
-  const fromAddress = process.env.SMTP_FROM && process.env.SMTP_FROM.includes('<') 
-    ? process.env.SMTP_FROM 
-    : { name: fromName, address: fallbackSenderAddress };
+  const fromAddress = process.env.SMTP_FROM || fromName; // just in case
 
   for (const msg of validMessages) {
     try {
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      const info = await transporter.sendMail({
-        from: fromAddress,
-        replyTo: fallbackSenderAddress,
-        to: msg.to,
+      const payload = {
+        sender: { name: "Encore Financials", email: fallbackSenderAddress },
+        to: [{ email: msg.to }],
         subject: msg.subject,
-        text: msg.htmlBody ? msg.htmlBody.replace(/<[^>]+>/g, '') : '',
-        html: msg.htmlBody
+        htmlContent: msg.htmlBody
+      };
+
+      const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+          "api-key": apiKey,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
       });
 
-      console.log(`Nodemailer sending info for ${msg.to}:`, info);
+      const responseData = await response.json().catch(() => null);
 
-      if (info.rejected && info.rejected.length > 0) {
+      if (!response.ok) {
+        console.error(`Brevo API rejected sending for ${msg.to}:`, responseData);
         results.push({
           to: msg.originalTo,
           success: false,
-          id: info.messageId || null,
-          error: `Rejected by SMTP: ${info.response}`
+          id: null,
+          error: `Rejected by Brevo API: ${responseData?.message || response.statusText}`
         });
       } else {
         results.push({
           to: msg.originalTo,
           success: true,
-          id: info.messageId || null,
+          id: responseData?.messageId || null,
           error: null
         });
       }
@@ -281,14 +272,14 @@ async function processEmailMessages(transporter: any, messages: any[]): Promise<
         saveScheduledJobs(jobs); // Persist immediately so another tick doesn't pick it up
         
         try {
-          const transporter = getTransporter();
-          if (transporter) {
-            const results = await processEmailMessages(transporter, job.messages);
+          const apiKey = process.env.BREVO_API_KEY;
+          if (apiKey) {
+            const results = await processEmailMessages(apiKey, job.messages);
             job.status = 'completed';
             job.results = results;
           } else {
             job.status = 'failed';
-            job.error = 'SMTP credentials not configured';
+            job.error = 'Brevo API key not configured';
           }
         } catch (err: any) {
           console.error(`Error processing scheduled job ${job.id}:`, err);
@@ -332,9 +323,9 @@ async function processEmailMessages(transporter: any, messages: any[]): Promise<
   });
 
   app.post('/api/send-blast', async (req, res) => {
-    const transporter = getTransporter();
-    if (!transporter) {
-      return res.status(500).json({ error: 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not fully configured on the server.' });
+    const apiKey = process.env.BREVO_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Brevo API key (BREVO_API_KEY) is not configured on the server.' });
     }
 
     const { messages } = req.body;
@@ -344,7 +335,7 @@ async function processEmailMessages(transporter: any, messages: any[]): Promise<
     }
 
     try {
-      const results = await processEmailMessages(transporter, messages);
+      const results = await processEmailMessages(apiKey, messages);
       res.json({ results });
     } catch (error) {
       console.error('Blast Error:', error);

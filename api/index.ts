@@ -80,24 +80,10 @@ const getTransporter = () => {
 const router = express.Router();
 
 router.get('/config-status', async (req, res) => {
-  let smtpVerify = false;
-  let smtpError = null;
-
-  try {
-    const transporter = getTransporter();
-    if (transporter) {
-      await transporter.verify();
-      smtpVerify = true;
-    }
-  } catch (error: any) {
-    smtpError = error.message || 'Verification failed';
-    console.error('SMTP test connection failed:', error);
-  }
-
   res.json({
-    hasSmtpConfig: !!process.env.SMTP_HOST && !!process.env.SMTP_USER,
-    smtpWorking: smtpVerify,
-    smtpError: smtpError,
+    hasSmtpConfig: !!process.env.BREVO_API_KEY,
+    smtpWorking: !!process.env.BREVO_API_KEY,
+    smtpError: null,
     hasGeminiKey: !!process.env.GEMINI_API_KEY
   });
 });
@@ -135,9 +121,9 @@ router.post('/generate-content', async (req, res) => {
 });
 
 router.post('/send-blast', async (req, res) => {
-  const transporter = getTransporter();
-  if (!transporter) {
-    return res.status(500).json({ error: 'SMTP credentials (SMTP_HOST, SMTP_USER, SMTP_PASS) are not fully configured on the server.' });
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'Brevo API key (BREVO_API_KEY) is not fully configured on the server.' });
   }
 
   const { messages } = req.body;
@@ -202,42 +188,47 @@ router.post('/send-blast', async (req, res) => {
       return res.json({ results });
     }
 
-    console.log(`[send-blast] Attempting to send ${validMessages.length} valid message(s) sequentially with Nodemailer...`);
-    const smtpUser = process.env.SMTP_USER || 'no-reply@encorefinancials.com';
+    console.log(`[send-blast] Attempting to send ${validMessages.length} valid message(s) sequentially with Brevo API...`);
     const fallbackSenderAddress = 'no-reply@encorefinancials.com';
-    const fromName = 'Encore Leasing and Finance Corp.';
-    const fromAddress = process.env.SMTP_FROM && process.env.SMTP_FROM.includes('<') 
-      ? process.env.SMTP_FROM 
-      : { name: fromName, address: fallbackSenderAddress };
+    const fromName = 'Encore Financials';
 
     for (const msg of validMessages) {
       try {
         // Apply a small sleep to strictly avoid rate limits
         await new Promise(resolve => setTimeout(resolve, 500));
 
-        const info = await transporter.sendMail({
-          from: fromAddress,
-          replyTo: fallbackSenderAddress,
-          to: msg.to,
+        const payload = {
+          sender: { name: fromName, email: fallbackSenderAddress },
+          to: [{ email: msg.to }],
           subject: msg.subject,
-          text: msg.htmlBody ? msg.htmlBody.replace(/<[^>]+>/g, '') : '',
-          html: msg.htmlBody
+          htmlContent: msg.htmlBody
+        };
+
+        const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+          method: "POST",
+          headers: {
+            "api-key": apiKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
         });
 
-        console.log(`[send-blast] Nodemailer sending info for ${msg.to}:`, info);
+        const responseData = await response.json().catch(() => null);
 
-        if (info.rejected && info.rejected.length > 0) {
+        if (!response.ok) {
+          console.error(`[send-blast] Brevo API rejected sending for ${msg.to}:`, responseData);
           results.push({
             to: msg.originalTo,
             success: false,
-            id: info.messageId || null,
-            error: `Rejected by SMTP: ${info.response}`
+            id: null,
+            error: `Rejected by Brevo API: ${responseData?.message || response.statusText}`
           });
         } else {
+          console.log(`[send-blast] Brevo API sending info for ${msg.to}:`, responseData);
           results.push({
             to: msg.originalTo,
             success: true,
-            id: info.messageId || null,
+            id: responseData?.messageId || null,
             error: null
           });
         }

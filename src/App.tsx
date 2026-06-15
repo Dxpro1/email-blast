@@ -208,6 +208,16 @@ export default function App() {
   }, [isPaused]);
   
   const [blastProgress, setBlastProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
+  const [blastQueue, setBlastQueue] = useState<{
+    totalBatches: number;
+    currentBatchIndex: number;
+    status: 'idle' | 'sending' | 'paused' | 'completed' | 'error';
+    batches: {
+      status: 'pending' | 'processing' | 'completed' | 'error';
+      batchNum: number;
+      size: number;
+    }[];
+  } | null>(null);
   const [history, setHistory] = useState<BlastHistory[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<BlastHistory | null>(null);
   const [selectedHistoryRecipientIndex, setSelectedHistoryRecipientIndex] = useState<number>(0);
@@ -313,6 +323,30 @@ export default function App() {
       toast.error("Failed to refresh analytics data");
     } finally {
       setIsRefreshingAnalytics(false);
+    }
+  };
+
+  const handleRetryFailedEmails = (historyItem?: BlastHistory) => {
+    const targetHistory = historyItem || selectedHistory;
+    if (!targetHistory) return;
+    
+    const failedRawContacts = targetHistory.rawContacts?.filter(c => c.status === 'failed') || [];
+    const legacyFailedContacts = targetHistory.failedContacts || [];
+    
+    const contactsToRetry = failedRawContacts.length > 0 ? failedRawContacts : legacyFailedContacts;
+    
+    if (contactsToRetry.length === 0) {
+      toast.error("No failed contacts found to retry.");
+      return;
+    }
+
+    if (confirm(`This will discard your current draft and load ${contactsToRetry.length} failed contact(s) into the Compose tab. Proceed?`)) {
+      setContacts(contactsToRetry);
+      setSubject(targetHistory.subject);
+      setBody(targetHistory.body);
+      setActiveTab('compose');
+      setSelectedHistory(null);
+      toast.success(`Loaded ${contactsToRetry.length} failed contact(s). Ready to send.`);
     }
   };
 
@@ -1322,6 +1356,17 @@ Encore Portal Admin`;
       const totalBatches = Math.ceil(messages.length / batchSize);
       const delayBetweenBatches = 500;
       
+      setBlastQueue({
+        totalBatches,
+        currentBatchIndex: -1,
+        status: 'sending',
+        batches: Array.from({ length: totalBatches }).map((_, idx) => ({
+          status: 'pending',
+          batchNum: idx + 1,
+          size: Math.min(batchSize, messages.length - idx * batchSize)
+        }))
+      });
+
       let failedContactsAccumulator: Contact[] = [];
       let successCountAccumulator = 0;
       const finalizedContacts: Contact[] = [];
@@ -1367,13 +1412,24 @@ Encore Portal Admin`;
       }
 
       for (let i = 0; i < messages.length; i += batchSize) {
+        const batchIndex = Math.floor(i / batchSize);
+        const batchNum = batchIndex + 1;
+
+        setBlastQueue(prev => {
+          if (!prev) return prev;
+          const newBatches = [...prev.batches];
+          newBatches[batchIndex] = { ...newBatches[batchIndex], status: 'processing' };
+          return { ...prev, currentBatchIndex: batchIndex, batches: newBatches, status: 'sending' };
+        });
+
         while (isPausedRef.current) {
+          setBlastQueue(prev => prev ? { ...prev, status: 'paused' } : prev);
           await new Promise(resolve => setTimeout(resolve, 500));
         }
+        setBlastQueue(prev => prev ? { ...prev, status: 'sending' } : prev);
         
         const currentBatch = messages.slice(i, i + batchSize);
         const currentContactsBatch = contacts.slice(i, i + batchSize);
-        const batchNum = Math.floor(i / batchSize) + 1;
         
         if (toastId) {
           toast.loading(`Sending batch ${batchNum} of ${totalBatches}...`, { id: toastId });
@@ -1433,6 +1489,14 @@ Encore Portal Admin`;
               });
             });
           }
+          
+          setBlastQueue(prev => {
+            if (!prev) return prev;
+            const newBatches = [...prev.batches];
+            // If all failed in this batch because of the results loop, mark as error? No, just mark completed and blastProgress will show failures
+            newBatches[batchIndex] = { ...newBatches[batchIndex], status: 'completed' };
+            return { ...prev, batches: newBatches };
+          });
         } catch (err: any) {
           console.error(`Batch ${batchNum} failed:`, err);
           const errorMsg = err.message || 'Batch request failed';
@@ -1444,6 +1508,13 @@ Encore Portal Admin`;
             };
             failedContactsAccumulator.push(failedContact);
             finalizedContacts.push(failedContact);
+          });
+          
+          setBlastQueue(prev => {
+            if (!prev) return prev;
+            const newBatches = [...prev.batches];
+            newBatches[batchIndex] = { ...newBatches[batchIndex], status: 'error' };
+            return { ...prev, batches: newBatches };
           });
         }
         
@@ -1515,11 +1586,14 @@ Encore Portal Admin`;
 
       toast.success(`Blast sent to ${contacts.length} recipients!`);
       
+      setBlastQueue(prev => prev ? { ...prev, status: 'completed' } : prev);
+      
       // Clear form after successful blast
       setSubject('');
       setBody('');
     } catch (error: any) {
       toast.error(error.message || 'Failed to send blast');
+      setBlastQueue(prev => prev ? { ...prev, status: 'error' } : prev);
     } finally {
       setIsSending(false);
     }
@@ -2224,6 +2298,67 @@ Encore Portal Admin`;
                   </div>
                 </div>
 
+                {/* Blast Queue Visual Indicator */}
+                {blastQueue && blastQueue.status !== 'idle' && blastQueue.totalBatches > 0 && (
+                  <Card className="border-brand-200 shadow-sm bg-brand-50 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                    <CardHeader className="pb-3 border-b border-brand-100/50">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-brand-800 text-sm flex items-center">
+                          {blastQueue.status === 'paused' ? (
+                            <Pause className="w-4 h-4 mr-2 text-brand-600" />
+                          ) : blastQueue.status === 'sending' ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin text-brand-600" />
+                          ) : blastQueue.status === 'completed' ? (
+                            <CheckCircle2 className="w-4 h-4 mr-2 text-green-600" />
+                          ) : (
+                            <AlertCircle className="w-4 h-4 mr-2 text-red-600" />
+                          )}
+                          Live Blast Queue {blastQueue.status === 'paused' ? '(Paused)' : blastQueue.status === 'completed' ? '(Completed)' : blastQueue.status === 'error' ? '(Error)' : '(Sending)'}
+                        </CardTitle>
+                        <Badge variant="outline" className="bg-white border-brand-200 text-brand-700">
+                           {blastQueue.batches.filter(b => b.status === 'completed' || b.status === 'error').length} / {blastQueue.totalBatches} Batches
+                        </Badge>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-4">
+                      <div className="flex flex-wrap gap-2">
+                        {blastQueue.batches.map((batch) => {
+                          let bgColor = "bg-white";
+                          let borderColor = "border-gray-200";
+                          let textColor = "text-gray-500";
+                          
+                          if (batch.status === 'processing') {
+                            bgColor = "bg-brand-100";
+                            borderColor = "border-brand-400";
+                            textColor = "text-brand-700 font-bold";
+                          } else if (batch.status === 'completed') {
+                            bgColor = "bg-green-100";
+                            borderColor = "border-green-400 border-2";
+                            textColor = "text-green-700 font-bold";
+                          } else if (batch.status === 'error') {
+                            bgColor = "bg-red-100";
+                            borderColor = "border-red-400 border-2";
+                            textColor = "text-red-700 font-bold";
+                          }
+
+                          return (
+                            <div 
+                              key={batch.batchNum}
+                              className={`flex flex-col items-center justify-center min-w-[3.5rem] h-12 rounded-md border text-xs transition-all ${bgColor} ${borderColor}`}
+                              title={`Batch ${batch.batchNum}: ${batch.size} emails (${batch.status})`}
+                            >
+                              <span className={textColor}>B{batch.batchNum}</span>
+                              {batch.status === 'processing' && <Loader2 className="w-3 h-3 mt-1 animate-spin text-brand-600" />}
+                              {batch.status === 'completed' && <CheckCircle2 className="w-3 h-3 mt-1 text-green-600" />}
+                              {batch.status === 'error' && <AlertCircle className="w-3 h-3 mt-1 text-red-600" />}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Blast Analytics View */}
                 <div>
                   <div className="flex items-center justify-between mb-4 mt-8">
@@ -2529,14 +2664,14 @@ Encore Portal Admin`;
                       <CardHeader className="pb-2">
                         <CardTitle className="text-red-800 text-sm flex items-center">
                           <AlertCircle className="w-4 h-4 mr-2" />
-                          {!configStatus.hasSmtpConfig ? 'Configuration Required' : 'SMTP Connection Failed'}
+                          {!configStatus.hasSmtpConfig ? 'Configuration Required' : 'API Connection Failed'}
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
                         <p className="text-xs text-red-700 leading-relaxed">
                           {!configStatus.hasSmtpConfig 
-                            ? <>Your <strong>SMTP credentials</strong> are missing. Emails cannot be sent until you supply <strong>SMTP_HOST</strong>, <strong>SMTP_USER</strong>, and <strong>SMTP_PASS</strong> keys to the <strong>Secrets</strong> panel in AI Studio settings.</>
-                            : <>Your <strong>SMTP credentials</strong> are configured but the connection failed. Error: {configStatus.smtpError || 'Unknown Error'}. Please check your Brevo credentials.</>
+                            ? <>Your <strong>Brevo API key</strong> is missing. Emails cannot be sent until you supply the <strong>BREVO_API_KEY</strong> key to the <strong>Secrets</strong> panel in AI Studio settings.</>
+                            : <>Your <strong>Brevo API key</strong> is configured but the connection failed. Error: {configStatus.smtpError || 'Unknown Error'}. Please verify your Brevo API credentials.</>
                           }
                         </p>
                         <Button 
@@ -2544,7 +2679,7 @@ Encore Portal Admin`;
                           className="text-xs p-0 h-auto text-red-800 font-bold mt-2"
                           onClick={() => window.open('https://app.brevo.com/settings/keys/smtp', '_blank')}
                         >
-                          Configure your Brevo SMTP →
+                          Configure your Brevo API Key →
                         </Button>
                       </CardContent>
                     </Card>
@@ -2571,7 +2706,7 @@ Encore Portal Admin`;
                       
                       <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg">
                         <p className="text-[10px] text-amber-800 leading-tight">
-                          <strong>Note:</strong> Campaign is configured to send via Brevo SMTP. Ensure you follow Brevo's sending limits and have your domain verified.
+                          <strong>Note:</strong> Campaign is configured to send via Brevo API. Ensure you follow Brevo's sending limits and have your domain verified.
                         </p>
                       </div>
                     </CardContent>
@@ -2864,15 +2999,28 @@ Encore Portal Admin`;
                                   )}
                                 </td>
                                 <td className="py-4 text-right">
-                                  <Button 
-                                    variant="ghost" 
-                                    size="sm" 
-                                    className="text-brand-600 hover:bg-brand-50"
-                                    onClick={() => setSelectedHistory(item)}
-                                  >
-                                    Details
-                                    <ChevronRight className="w-4 h-4 ml-1" />
-                                  </Button>
+                                  <div className="flex justify-end items-center gap-2">
+                                    {(item.failedCount || 0) > 0 && (
+                                      <Button 
+                                        variant="outline" 
+                                        size="sm" 
+                                        className="text-red-600 border-red-200 hover:bg-red-50 bg-white"
+                                        onClick={() => handleRetryFailedEmails(item)}
+                                        title={`Retry ${item.failedCount} Failed Emails`}
+                                      >
+                                        <RefreshCw className="w-3.5 h-3.5" />
+                                      </Button>
+                                    )}
+                                    <Button 
+                                      variant="ghost" 
+                                      size="sm" 
+                                      className="text-brand-600 hover:bg-brand-50"
+                                      onClick={() => setSelectedHistory(item)}
+                                    >
+                                      Details
+                                      <ChevronRight className="w-4 h-4 ml-1" />
+                                    </Button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -3346,10 +3494,25 @@ Encore Portal Admin`;
       }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Campaign Details</DialogTitle>
-            <DialogDescription>
-              Sent on {selectedHistory?.timestamp}
-            </DialogDescription>
+            <div className="flex justify-between items-start pr-8">
+              <div>
+                <DialogTitle>Campaign Details</DialogTitle>
+                <DialogDescription>
+                  Sent on {selectedHistory?.timestamp}
+                </DialogDescription>
+              </div>
+              {(selectedHistory?.failedCount || 0) > 0 && (
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="text-red-700 bg-red-50 border-red-200 hover:bg-red-100 whitespace-nowrap shrink-0" 
+                  onClick={() => handleRetryFailedEmails()}
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Retry {selectedHistory?.failedCount} Failed
+                </Button>
+              )}
+            </div>
           </DialogHeader>
           <div className="space-y-6 py-4">
             <div className="grid grid-cols-2 gap-4">
