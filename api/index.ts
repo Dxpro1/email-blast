@@ -204,10 +204,11 @@ router.post('/send-blast', async (req, res) => {
 
     console.log(`[send-blast] Attempting to send ${validMessages.length} valid message(s) sequentially with Nodemailer...`);
     const smtpUser = process.env.SMTP_USER || 'no-reply@encorefinancials.com';
+    const fallbackSenderAddress = 'no-reply@encorefinancials.com';
     const fromName = 'Encore Leasing and Finance Corp.';
     const fromAddress = process.env.SMTP_FROM && process.env.SMTP_FROM.includes('<') 
       ? process.env.SMTP_FROM 
-      : { name: fromName, address: smtpUser };
+      : { name: fromName, address: fallbackSenderAddress };
 
     for (const msg of validMessages) {
       try {
@@ -216,7 +217,7 @@ router.post('/send-blast', async (req, res) => {
 
         const info = await transporter.sendMail({
           from: fromAddress,
-          replyTo: smtpUser,
+          replyTo: fallbackSenderAddress,
           to: msg.to,
           subject: msg.subject,
           text: msg.htmlBody ? msg.htmlBody.replace(/<[^>]+>/g, '') : '',

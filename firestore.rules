@@ -2,52 +2,31 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // 0. Default Deny
     match /{document=**} {
       allow read, write: if false;
     }
 
-    // 1. Global Helpers
-    function isSignedIn() {
-      return request.auth != null;
-    }
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isSuperAdmin() { return isSignedIn() && request.auth.token.email == 'encorefinancials@gmail.com'; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
 
-    function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
-    }
-
-    function isSuperAdmin() {
-      return isSignedIn() && request.auth.token.email == 'encorefinancials@gmail.com';
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    // 2. Entity Validations
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'email']) 
-        && data.uid is string 
-        && data.email is string 
-        && data.email.size() <= 256
-        && data.uid == request.auth.uid;
+        && data.uid is string && data.email is string 
+        && data.email.size() <= 256 && data.uid == request.auth.uid;
     }
 
     function isValidContact(data) {
-      return data.keys().hasAll(['email']) 
-        && data.email is string 
-        && data.email.size() <= 256;
+      return data.keys().hasAll(['email']) && data.email is string && data.email.size() <= 256;
     }
 
     function isValidHistory(data) {
-      return data.keys().hasAll(['subject', 'body', 'recipientCount', 'status'])
+      return data.keys().hasAll(['subject', 'status'])
         && data.subject is string && data.subject.size() <= 500
-        && data.body is string && data.body.size() <= 100000
-        && data.recipientCount is int
-        && data.status in ['success', 'failed', 'partial'];
+        && data.status in ['success', 'failed', 'partial', 'in_progress'];
     }
 
-    // 3. Match Blocks
     match /users/{userId} {
       allow read, write: if isSuperAdmin();
       allow get: if isOwner(userId);
@@ -56,22 +35,17 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt']);
 
       match /contacts/{contactId} {
-        allow list: if isOwner(userId);
-        allow get: if isOwner(userId);
+        allow list, get, delete: if isOwner(userId);
         allow create: if isOwner(userId) && isValidContact(request.resource.data) && isValidId(contactId);
         allow update: if isOwner(userId) && isValidContact(request.resource.data);
-        allow delete: if isOwner(userId);
       }
 
       match /history/{historyId} {
-        allow list: if isOwner(userId);
-        allow get: if isOwner(userId);
-        allow create: if isOwner(userId) && isValidHistory(request.resource.data) && isValidId(historyId);
-        allow delete: if isOwner(userId);
+        allow list, get, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidHistory(request.resource.data);
       }
     }
     
-    // Testing collection
     match /test/connection {
       allow get: if isSignedIn();
     }

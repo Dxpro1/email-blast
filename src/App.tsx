@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Mail, 
   Users, 
@@ -27,7 +27,9 @@ import {
   UserPlus,
   UserCheck,
   Calendar,
-  Edit2
+  Edit2,
+  Pause,
+  Play
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -197,6 +199,15 @@ export default function App() {
   const [body, setBody] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(isPaused);
+  
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+  
+  const [blastProgress, setBlastProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
   const [history, setHistory] = useState<BlastHistory[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<BlastHistory | null>(null);
   const [selectedHistoryRecipientIndex, setSelectedHistoryRecipientIndex] = useState<number>(0);
@@ -251,6 +262,59 @@ export default function App() {
       currentRecipientsCount: contacts.length
     };
   }, [history, contacts]);
+
+  const blastAnalytics = useMemo(() => {
+    const monthlyVolume: Record<string, { month: string, sent: number }> = {};
+    const templateUsage: Record<string, number> = {};
+
+    history.forEach(item => {
+      const dateStr = item.createdAt || item.timestamp;
+      const dateObj = new Date(dateStr);
+      if (!isNaN(dateObj.getTime())) {
+        const monthKey = dateObj.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+        if (!monthlyVolume[monthKey]) {
+          monthlyVolume[monthKey] = { month: monthKey, sent: 0 };
+        }
+        monthlyVolume[monthKey].sent += (item.successCount ?? (item.status === 'success' || !item.status ? item.recipientCount : 0));
+      }
+
+      const subject = item.subject || '(No Subject)';
+      templateUsage[subject] = (templateUsage[subject] || 0) + 1;
+    });
+
+    const sortedMonths = Object.values(monthlyVolume).sort((a, b) => {
+      return new Date(a.month).getTime() - new Date(b.month).getTime();
+    });
+
+    const topTemplates = Object.entries(templateUsage)
+      .map(([subject, count]) => ({ subject, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    return {
+      monthlyVolume: sortedMonths,
+      topTemplates
+    };
+  }, [history]);
+
+  const refreshAnalytics = async () => {
+    if (!user || dbConnected !== true) return;
+    setIsRefreshingAnalytics(true);
+    try {
+      const historyPath = `users/${user.uid}/history`;
+      const qHistory = query(collection(db, historyPath), orderBy('createdAt', 'desc'));
+      const snapshot = await getDocs(qHistory);
+      const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BlastHistory));
+      setHistory(list);
+      localStorage.setItem(`encore_history_${user.uid}`, JSON.stringify(list));
+      toast.success("Analytics data refreshed successfully");
+    } catch (err) {
+      console.error("Failed to refresh history", err);
+      toast.error("Failed to refresh analytics data");
+    } finally {
+      setIsRefreshingAnalytics(false);
+    }
+  };
 
   const saveLocalContacts = (list: Contact[]) => {
     if (user) {
@@ -506,7 +570,7 @@ export default function App() {
     });
 
     const historyPath = `users/${user.uid}/history`;
-    const qHistory = query(collection(db, historyPath), orderBy('timestamp', 'desc'));
+    const qHistory = query(collection(db, historyPath), orderBy('createdAt', 'desc'));
     const unsubHistory = onSnapshot(qHistory, (snapshot) => {
       const list = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BlastHistory));
       setHistory(list);
@@ -1237,6 +1301,8 @@ Encore Portal Admin`;
     }
 
     setIsSending(true);
+    setIsPaused(false);
+    setBlastProgress({ current: 0, total: contacts.length, success: 0, failed: 0 });
 
     try {
       const messages = contacts.map(contact => {
@@ -1286,9 +1352,12 @@ Encore Portal Admin`;
           } else {
             saveLocalHistory([{ ...initialHistoryItem, id: localHistoryId } as any, ...history]);
           }
-        } catch (histErr) {
+        } catch (histErr: any) {
           console.warn("Failed to write initial online history:", histErr);
-          saveLocalHistory([{ ...initialHistoryItem, id: localHistoryId } as any, ...history]);
+          toast.error("Warning: Database write failed (likely missing permissions). Showing local progress only.");
+          // To prevent onSnapshot from wiping our local progress, we decouple from the DB list for this specific blast
+          historyDocRef = null;
+          setHistory(prev => [{ ...initialHistoryItem, id: localHistoryId } as any, ...prev]);
         }
       }
 
@@ -1298,6 +1367,10 @@ Encore Portal Admin`;
       }
 
       for (let i = 0; i < messages.length; i += batchSize) {
+        while (isPausedRef.current) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
         const currentBatch = messages.slice(i, i + batchSize);
         const currentContactsBatch = contacts.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
@@ -1312,6 +1385,11 @@ Encore Portal Admin`;
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ messages: currentBatch })
           });
+
+          const contentType = response.headers.get("content-type");
+          if (contentType && contentType.includes("text/html")) {
+            throw new Error("Backend server is not running (received HTML instead of JSON). If deploying to Vercel, ensure you deploy a Node server or use Serverless functions.");
+          }
 
           const text = await response.text();
           let data = {} as any;
@@ -1383,6 +1461,13 @@ Encore Portal Admin`;
             ...contacts.slice(i + batchSize).map(c => ({ ...c, status: 'pending' }))
           ]
         };
+
+        setBlastProgress({
+          current: Math.min(i + batchSize, contacts.length),
+          total: contacts.length,
+          success: successCountAccumulator,
+          failed: failedContactsAccumulator.length
+        });
 
         if (historyDocRef && dbConnected) {
           await setDoc(historyDocRef, liveProgressParams, { merge: true }).catch(console.error);
@@ -2138,6 +2223,82 @@ Encore Portal Admin`;
                     </Card>
                   </div>
                 </div>
+
+                {/* Blast Analytics View */}
+                <div>
+                  <div className="flex items-center justify-between mb-4 mt-8">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">Blast Analytics</h3>
+                      <p className="text-sm text-gray-500">Track and view performance metrics</p>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={refreshAnalytics} 
+                      disabled={isRefreshingAnalytics || !dbConnected}
+                      className="text-brand-600 border-brand-200 hover:bg-brand-50 bg-white"
+                    >
+                      <RefreshCw className={`w-4 h-4 mr-2 ${isRefreshingAnalytics ? 'animate-spin' : ''}`} />
+                      {isRefreshingAnalytics ? 'Refreshing...' : 'Refresh Data'}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <Card className="border-gray-200 shadow-sm">
+                    <CardHeader className="pb-2">
+                      <CardTitle>Monthly Email Volume</CardTitle>
+                      <CardDescription>Total sent emails broken down by month</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {blastAnalytics.monthlyVolume.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-10 text-gray-400">
+                          <p className="text-sm">No monthly data available.</p>
+                        </div>
+                      ) : (
+                        <div className="h-64 mt-4">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={blastAnalytics.monthlyVolume} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                              <Tooltip
+                                cursor={{ fill: 'rgba(0,0,0,0.02)' }}
+                                contentStyle={{ borderRadius: '8px', border: '1px solid #f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '11px', padding: '8px' }}
+                              />
+                              <Bar dataKey="sent" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-gray-200 shadow-sm flex flex-col">
+                    <CardHeader className="pb-2">
+                      <CardTitle>Top Templates Used</CardTitle>
+                      <CardDescription>Most frequently used subject lines across blasts</CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex-1">
+                      {blastAnalytics.topTemplates.length === 0 ? (
+                         <div className="flex flex-col items-center justify-center py-10 text-gray-400 h-full">
+                           <p className="text-sm">No templates used yet.</p>
+                         </div>
+                      ) : (
+                        <div className="space-y-3 mt-2">
+                          {blastAnalytics.topTemplates.map((template, idx) => (
+                            <div key={idx} className="flex flex-col bg-white hover:bg-gray-50 border border-gray-100 rounded-lg p-3.5 transition-colors shadow-sm">
+                               <div className="flex items-start justify-between gap-4">
+                                  <h4 className="font-medium text-sm text-gray-700 line-clamp-2 leading-relaxed">{template.subject}</h4>
+                                  <span className="bg-brand-50 text-brand-700 border border-brand-100 text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">
+                                    {template.count} {template.count === 1 ? 'use' : 'uses'}
+                                  </span>
+                               </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+                </div>
               </motion.div>
             </TabsContent>
 
@@ -2375,15 +2536,15 @@ Encore Portal Admin`;
                         <p className="text-xs text-red-700 leading-relaxed">
                           {!configStatus.hasSmtpConfig 
                             ? <>Your <strong>SMTP credentials</strong> are missing. Emails cannot be sent until you supply <strong>SMTP_HOST</strong>, <strong>SMTP_USER</strong>, and <strong>SMTP_PASS</strong> keys to the <strong>Secrets</strong> panel in AI Studio settings.</>
-                            : <>Your <strong>SMTP credentials</strong> are configured but the connection failed. Error: {configStatus.smtpError || 'Unknown Error'}. Please check your Hostinger credentials.</>
+                            : <>Your <strong>SMTP credentials</strong> are configured but the connection failed. Error: {configStatus.smtpError || 'Unknown Error'}. Please check your Brevo credentials.</>
                           }
                         </p>
                         <Button 
                           variant="link" 
                           className="text-xs p-0 h-auto text-red-800 font-bold mt-2"
-                          onClick={() => window.open('https://hostinger.com', '_blank')}
+                          onClick={() => window.open('https://app.brevo.com/settings/keys/smtp', '_blank')}
                         >
-                          Configure your Hostinger SMTP →
+                          Configure your Brevo SMTP →
                         </Button>
                       </CardContent>
                     </Card>
@@ -2410,11 +2571,73 @@ Encore Portal Admin`;
                       
                       <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg">
                         <p className="text-[10px] text-amber-800 leading-tight">
-                          <strong>Note:</strong> Campaign is configured to send via Hostinger SMTP. Please monitor your daily sending limits.
+                          <strong>Note:</strong> Campaign is configured to send via Brevo SMTP. Ensure you follow Brevo's sending limits and have your domain verified.
                         </p>
                       </div>
                     </CardContent>
                   </Card>
+
+                  {isSending && (
+                    <Card className="border-brand-200 shadow-sm bg-brand-50 mt-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-brand-800 text-sm flex items-center">
+                          {isPaused ? (
+                            <Pause className="w-4 h-4 mr-2 text-brand-600" />
+                          ) : (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin text-brand-600" />
+                          )}
+                          {isPaused ? 'Email Blast Paused' : 'Sending Email Blast...'}
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-xs font-medium text-brand-800">
+                            <span>Progress</span>
+                            <span>{blastProgress.total > 0 ? Math.round((blastProgress.current / blastProgress.total) * 100) : 0}%</span>
+                          </div>
+                          <div className="w-full bg-brand-200 rounded-full h-2">
+                            <div 
+                              className="bg-brand-600 h-2 rounded-full transition-all duration-300 ease-out"
+                              style={{ width: `${blastProgress.total > 0 ? Math.round((blastProgress.current / blastProgress.total) * 100) : 0}%` }}
+                            ></div>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-brand-600 pt-1">
+                            <span>{blastProgress.current} / {blastProgress.total} Processed</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div className="bg-white p-2.5 border border-brand-100 rounded-md shadow-sm">
+                            <div className="text-green-600 font-bold flex items-center mb-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                              Successful
+                            </div>
+                            <div className="text-brand-900 font-bold text-xl">{blastProgress.success}</div>
+                          </div>
+                          <div className="bg-white p-2.5 border border-brand-100 rounded-md shadow-sm">
+                            <div className="text-red-600 font-bold flex items-center mb-1">
+                              <AlertCircle className="w-3.5 h-3.5 mr-1.5" />
+                              Failed
+                            </div>
+                            <div className="text-brand-900 font-bold text-xl">{blastProgress.failed}</div>
+                          </div>
+                        </div>
+                        
+                        <div className="pt-2 flex gap-2">
+                          {!isPaused ? (
+                            <Button size="sm" variant="outline" className="w-full text-brand-700 bg-white border-brand-200" onClick={() => setIsPaused(true)}>
+                              <Pause className="w-4 h-4 mr-2" />
+                              Pause Blast
+                            </Button>
+                          ) : (
+                            <Button size="sm" variant="default" className="w-full bg-brand-600 hover:bg-brand-700 text-white" onClick={() => setIsPaused(false)}>
+                              <Play className="w-4 h-4 mr-2" />
+                              Resume Blast
+                            </Button>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
               </motion.div>
             </TabsContent>
