@@ -89,7 +89,7 @@ router.get('/config-status', async (req, res) => {
 });
 
 router.post('/generate-content', async (req, res) => {
-  const { subject } = req.body;
+  const { subject, templateStyle } = req.body;
   if (!subject) {
     return res.status(400).json({ error: 'Subject is required.' });
   }
@@ -108,9 +108,18 @@ router.post('/generate-content', async (req, res) => {
       }
     });
 
+    let promptContext = 'a professional email body';
+    if (templateStyle === 'marketing') {
+      promptContext = 'an engaging, high-converting marketing announcement with a strong call-to-action';
+    } else if (templateStyle === 'birthday') {
+      promptContext = 'a warm, celebratory birthday greeting';
+    } else if (templateStyle === 'announcement') {
+      promptContext = 'a clear, professional company announcement or news update';
+    }
+
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: `Write a professional marketing email body for the subject: "${subject}". Keep it concise, engaging, and include a call to action. Return only the email body text.`,
+      contents: `Write ${promptContext} for the subject: "${subject}". Keep it concise, engaging, and professional. Return only the email body text.`,
     });
 
     res.json({ text: response.text || '' });

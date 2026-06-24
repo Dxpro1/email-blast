@@ -29,7 +29,8 @@ import {
   Calendar,
   Edit2,
   Pause,
-  Play
+  Play,
+  Image
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -172,7 +173,7 @@ Should you have any clarification, you may call or text (044) 940-5625 or 0919-0
     id: 'due_date',
     name: 'Due Date',
     subject: 'Payment Reminder - Encore Leasing & Finance Corp.',
-    body: `Good Day Ms./Mr. #firstname, Just a gentle reminder that your monthly amortization amounting to #periodicins PHP is due on #ddate. Kindly settle your amortization on time to avoid penalties. For inquiries, call us at  0919-077-2664. If payment has been made, please disregard this message`
+    body: `Good Day Ms./Mr. #firstname, Just a gentle reminder that your monthly amortization amounting to #periodicins is due on #ddate. Kindly settle your amortization on time to avoid penalties. For inquiries, call us at  0919-077-2664. If payment has been made, please disregard this message`
   }
 ];
 
@@ -197,6 +198,8 @@ export default function App() {
   const [contactSearchQuery, setContactSearchQuery] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [templateStyle, setTemplateStyle] = useState('standard');
+  const [bannerImageUrl, setBannerImageUrl] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
@@ -221,6 +224,8 @@ export default function App() {
   const [history, setHistory] = useState<BlastHistory[]>([]);
   const [selectedHistory, setSelectedHistory] = useState<BlastHistory | null>(null);
   const [selectedHistoryRecipientIndex, setSelectedHistoryRecipientIndex] = useState<number>(0);
+  const [selectedHistoryRecipientFilter, setSelectedHistoryRecipientFilter] = useState<'all' | 'success' | 'failed'>('all');
+  const [selectedHistoryRecipientSearch, setSelectedHistoryRecipientSearch] = useState<string>('');
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [configStatus, setConfigStatus] = useState<{ hasSmtpConfig: boolean; smtpWorking?: boolean; smtpError?: string; hasGeminiKey: boolean } | null>(null);
@@ -1060,12 +1065,85 @@ Encore Portal Admin`;
         }
   };
 
-  const replacePlaceholders = (text: string, contact: Contact) => {
+  const formatNumericValue = (val: any, key: string, isHtml: boolean = false): string => {
+    if (val === undefined || val === null) return '';
+    const strVal = String(val).trim();
+    if (!strVal) return '';
+
+    const lowerKey = key.toLowerCase();
+
+    // Check if the key indicates a date (e.g. ddate, expiry, birthday)
+    const isDateKey = ['ddate', 'expiry', 'birthday', 'bday', 'date'].some(d => lowerKey.includes(d));
+    if (isDateKey) {
+      if (isHtml) {
+        return `<strong>${strVal}</strong>`;
+      }
+      return strVal;
+    }
+    
+    // Check if the key indicates a monetary or general formatted amount/number
+    // We definitely want to exclude keys that we should NOT format:
+    // year, model, plate, expiry, date, phone, mobile, id, email, zip, code, pin, bday, birthday, timestamp, createdat, ref, index, number, account
+    const excludedKeys = ['year', 'model', 'plate', 'expiry', 'date', 'phone', 'mobile', 'id', 'email', 'zip', 'code', 'pin', 'bday', 'birthday', 'timestamp', 'createdat', 'ref', 'index', 'number', 'no', 'account', 'card', 'cvv'];
+    const isExcluded = excludedKeys.some(ex => lowerKey.includes(ex));
+
+    // Check if it's a financial key
+    const isFinancialKey = [
+      'amount', 'periodicins', 'amort', 'ins', 'penalty', 'balance', 'unpaid', 'premium', 'payment', 
+      'principal', 'interest', 'total', 'fine', 'fee', 'price', 'rate', 'value', 'cost', 'sum', 'due', 'charge'
+    ].some(fin => lowerKey.includes(fin));
+
+    // Try to parse the string to see if it is numeric
+    // Let's strip standard prefixes like PHP, Php, ₱, $, or spaces to check if what is left is a clean number
+    const prefixMatch = strVal.match(/^(PHP|Php|php|₱|\$|Rs|USD|EUR)\s*/i);
+    const suffixMatch = strVal.match(/\s*(PHP|Php|php|₱|\$|USD|EUR)$/i);
+    
+    let cleanVal = strVal;
+    let prefix = '';
+    let suffix = '';
+    
+    if (prefixMatch) {
+      prefix = prefixMatch[0];
+      cleanVal = cleanVal.slice(prefix.length);
+    } else if (suffixMatch) {
+      suffix = suffixMatch[0];
+      cleanVal = cleanVal.slice(0, cleanVal.length - suffix.length);
+    }
+    
+    // Strip commas if any to see if it's a numeric representation
+    const rawDigits = cleanVal.replace(/,/g, '');
+    
+    // Check if it is a valid decimal number (e.g., 3795 or 18540 or 12500.50)
+    if (/^\d+(\.\d+)?$/.test(rawDigits)) {
+      const num = parseFloat(rawDigits);
+      if (!isNaN(num)) {
+        if (isFinancialKey || !isExcluded) {
+          // Prepend 'PHP ' to financial keys if there is no pre-existing currency prefix or suffix
+          let finalPrefix = prefix;
+          if (isFinancialKey && !prefixMatch && !suffixMatch) {
+            finalPrefix = 'PHP ';
+          }
+          const formattedNum = num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const finalVal = `${finalPrefix}${formattedNum}${suffix}`;
+          if (isHtml) {
+            return `<strong>${finalVal}</strong>`;
+          }
+          return finalVal;
+        }
+      }
+    }
+    
+    return strVal;
+  };
+
+  const replacePlaceholders = (text: string, contact: Contact, isHtml: boolean = false) => {
     let result = text;
     Object.keys(contact).forEach(key => {
       const placeholder = `#${key}`;
       if (result.includes(placeholder)) {
-        result = result.replaceAll(placeholder, contact[key] || '');
+        const originalValue = contact[key];
+        const formattedValue = formatNumericValue(originalValue, key, isHtml);
+        result = result.replaceAll(placeholder, formattedValue);
       }
     });
     return result;
@@ -1198,7 +1276,7 @@ Encore Portal Admin`;
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ subject })
+        body: JSON.stringify({ subject, templateStyle })
       });
       
       const data = await response.json();
@@ -1217,7 +1295,9 @@ Encore Portal Admin`;
   };
 
   const generateEmailHtml = (subjectText: string, bodyText: string) => {
-    const isBirthday = subjectText.toLowerCase().includes('birthday') || bodyText.toLowerCase().includes('birthday');
+    const isBirthday = templateStyle === 'birthday' || subjectText.toLowerCase().includes('birthday') || bodyText.toLowerCase().includes('birthday');
+    const isMarketing = templateStyle === 'marketing';
+    const isAnnouncement = templateStyle === 'announcement';
     const currentYear = new Date().getFullYear();
 
     if (isBirthday) {
@@ -1225,7 +1305,7 @@ Encore Portal Admin`;
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); background-color: #ffffff;">
           <!-- Corporate Branding Header -->
           <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #f1f5f9;">
-            <img src="/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Celebration Banner -->
@@ -1271,11 +1351,92 @@ Encore Portal Admin`;
       `;
     }
 
+    if (isMarketing) {
+      return `
+        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #f4f7f6;">
+          <!-- Header -->
+          <div style="background-color: #102CA4; padding: 30px 20px; text-align: center;">
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-light.png" alt="Encore Leasing & Finance Corp." style="height: 50px; width: auto; max-width: 100%; display: inline-block; filter: brightness(0) invert(1);" referrerPolicy="no-referrer" />
+          </div>
+
+          <!-- Hero Image area (Optional/Abstract) -->
+          <div style="background-color: #FFDF00; height: 6px; width: 100%;"></div>
+          
+          <!-- Main Content -->
+          <div style="background-color: #ffffff; padding: 40px 35px; border-radius: 0 0 8px 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin: 0 15px 20px 15px; position: relative; top: -10px;">
+            <h1 style="color: #102CA4; font-size: 24px; font-weight: bold; margin-top: 0; margin-bottom: 25px; text-align: center; line-height: 1.3;">${subjectText}</h1>
+            
+            ${bannerImageUrl ? `
+              <div style="margin-top: 5px; margin-bottom: 25px; border-radius: 6px; overflow: hidden; border: 1px solid #edf2f7; text-align: center;">
+                <img src="${bannerImageUrl}" alt="Promotion Banner" style="width: 100%; height: auto; max-width: 100%; display: block;" referrerPolicy="no-referrer" />
+              </div>
+            ` : ''}
+
+            <div style="font-size: 16px; color: #4a5568; line-height: 1.8; white-space: pre-wrap; margin-bottom: 35px;">${bodyText}</div>
+            
+            <!-- Call to Action Button -->
+            <div style="text-align: center;">
+              <a href="https://encorefinancials.com/" style="display: inline-block; background-color: #102CA4; color: #ffffff; text-decoration: none; padding: 14px 32px; font-size: 16px; font-weight: bold; border-radius: 6px; text-transform: uppercase; letter-spacing: 1px;">Learn More Today</a>
+            </div>
+          </div>
+          
+          <!-- Simple Footer -->
+          <div style="padding: 20px; text-align: center;">
+            <p style="margin: 0; font-size: 12px; color: #718096; line-height: 1.6;">
+              Encore Leasing & Finance Corp.<br/>
+              Maharlika Highway, Cabanatuan City<br/>
+              <br/>
+              <a href="#" style="color: #4a5568; text-decoration: underline;">Unsubscribe</a> | <a href="https://encorefinancials.com/" style="color: #4a5568; text-decoration: underline;">Website</a>
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (isAnnouncement) {
+      return `
+        <div style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff; border: 1px solid #e2e8f0;">
+          <!-- Top Bar -->
+          <div style="background-color: #1a202c; padding: 12px 20px; text-align: right;">
+            <span style="color: #a0aec0; font-size: 11px; text-transform: uppercase; letter-spacing: 1px;">Official Announcement</span>
+          </div>
+          
+          <div style="padding: 40px 40px 20px 40px; border-bottom: 2px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between;">
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore" style="height: 45px; width: auto;" referrerPolicy="no-referrer" />
+          </div>
+          
+          <div style="padding: 40px;">
+            <h2 style="margin: 0 0 20px 0; color: #2d3748; font-size: 22px; font-weight: 600;">${subjectText}</h2>
+            
+            ${bannerImageUrl ? `
+              <div style="margin-top: 5px; margin-bottom: 25px; border-radius: 6px; overflow: hidden; border: 1px solid #edf2f7; text-align: center;">
+                <img src="${bannerImageUrl}" alt="Announcement Banner" style="width: 100%; height: auto; max-width: 100%; display: block;" referrerPolicy="no-referrer" />
+              </div>
+            ` : ''}
+
+            <div style="color: #4a5568; font-size: 15px; line-height: 1.7; white-space: pre-wrap;">${bodyText}</div>
+            
+            <div style="margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
+              <p style="font-size: 14px; color: #718096; margin: 0;">Sincerely,</p>
+              <p style="font-size: 15px; color: #2d3748; font-weight: bold; margin: 4px 0 0 0;">The Management Team</p>
+              <p style="font-size: 13px; color: #102CA4; margin: 2px 0 0 0;">Encore Leasing & Finance Corp.</p>
+            </div>
+          </div>
+          
+          <div style="background-color: #f7fafc; padding: 20px 40px; text-align: center; border-top: 1px solid #edf2f7;">
+            <p style="font-size: 11px; color: #a0aec0; margin: 0;">
+              &copy; ${currentYear} Encore Leasing & Finance Corp. All rights reserved.
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
     return `
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #ffffff;">
         <!-- Corporate Branding Header -->
         <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 3px solid #102CA4;">
-          <img src="/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+          <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
         </div>
         <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
           <div style="white-space: pre-wrap; font-size: 15px; color: #1f2937;">${bodyText}</div>
@@ -1340,8 +1501,8 @@ Encore Portal Admin`;
 
     try {
       const messages = contacts.map(contact => {
-        const personalizedBody = replacePlaceholders(body, contact);
-        const personalizedSubject = replacePlaceholders(subject, contact);
+        const personalizedBody = replacePlaceholders(body, contact, true);
+        const personalizedSubject = replacePlaceholders(subject, contact, false);
         
         const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
 
@@ -2041,8 +2202,8 @@ Encore Portal Admin`;
                         setIsScheduling(true);
                         try {
                           const messages = contacts.map(contact => {
-                            const personalizedBody = replacePlaceholders(body, contact);
-                            const personalizedSubject = replacePlaceholders(subject, contact);
+                            const personalizedBody = replacePlaceholders(body, contact, true);
+                            const personalizedSubject = replacePlaceholders(subject, contact, false);
                             const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
                             return {
                               to: [contact.email],
@@ -2569,20 +2730,22 @@ Encore Portal Admin`;
                           <CardDescription>Choose a template that matches your uploaded data.</CardDescription>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => setIsPreviewOpen(true)}
-                            disabled={!body}
-                            className="border-brand-200 text-brand-600 hover:bg-brand-50"
-                          >
-                            <Info className="w-4 h-4 mr-2" />
-                            Preview
-                          </Button>
+                          <Select value={templateStyle} onValueChange={setTemplateStyle}>
+                            <SelectTrigger className="w-[180px] bg-white">
+                              <Sparkles className="w-4 h-4 mr-2 text-brand-600" />
+                              <SelectValue placeholder="Design Theme" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="standard">Standard Notice</SelectItem>
+                              <SelectItem value="marketing">Marketing Promotion</SelectItem>
+                              <SelectItem value="announcement">Official Announcement</SelectItem>
+                              <SelectItem value="birthday">Birthday Greeting</SelectItem>
+                            </SelectContent>
+                          </Select>
                           <Select onValueChange={handleTemplateSelect}>
                             <SelectTrigger className="w-[200px] bg-white">
                               <BookOpen className="w-4 h-4 mr-2 text-brand-600" />
-                              <SelectValue placeholder="Select Template" />
+                              <SelectValue placeholder="Pre-written Content" />
                             </SelectTrigger>
                             <SelectContent>
                               {TEMPLATES.map(t => (
@@ -2590,10 +2753,104 @@ Encore Portal Admin`;
                               ))}
                             </SelectContent>
                           </Select>
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => setIsPreviewOpen(true)}
+                            disabled={!body}
+                            className="border-brand-200 text-brand-600 hover:bg-brand-50 shrink-0"
+                          >
+                            <Info className="w-4 h-4 mr-2" />
+                            Preview
+                          </Button>
                         </div>
                       </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                      {(templateStyle === 'marketing' || templateStyle === 'announcement') && (
+                        <div className="p-4 bg-brand-50/40 border border-brand-100 rounded-xl space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-1.5">
+                              <Image className="w-4 h-4 text-brand-600 shrink-0" />
+                              <span className="text-xs font-semibold text-brand-900">Campaign Header Banner Image (Optional)</span>
+                            </div>
+                            {bannerImageUrl && (
+                              <button 
+                                type="button"
+                                onClick={() => setBannerImageUrl('')} 
+                                className="text-[10px] text-red-650 hover:underline font-medium"
+                              >
+                                Remove Image
+                              </button>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                            <div className="md:col-span-5 space-y-1">
+                              <label htmlFor="bannerUrl" className="text-[10px] text-gray-500 uppercase tracking-wider font-bold block">Custom Image Link:</label>
+                              <Input 
+                                id="bannerUrl"
+                                placeholder="Paste image address (https://...)" 
+                                value={bannerImageUrl}
+                                onChange={(e) => setBannerImageUrl(e.target.value)}
+                                className="h-8 text-xs bg-white border-brand-200/60 focus:ring-brand-500"
+                              />
+                            </div>
+                            <div className="md:col-span-7 space-y-1">
+                              <span className="text-[10px] text-gray-500 uppercase tracking-wider font-bold block">Preset Banners:</span>
+                              <div className="flex flex-wrap gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setBannerImageUrl('https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&auto=format&fit=crop&q=80')}
+                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${
+                                    bannerImageUrl.includes('photo-1460925895917')
+                                      ? 'bg-brand-600 text-white border-transparent'
+                                      : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700 font-normal'
+                                  }`}
+                                >
+                                  📈 Business Growth
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBannerImageUrl('https://images.unsplash.com/photo-1557804506-669a67965ba0?w=600&auto=format&fit=crop&q=80')}
+                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${
+                                    bannerImageUrl.includes('photo-1557804506')
+                                      ? 'bg-brand-600 text-white border-transparent'
+                                      : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700 font-normal'
+                                  }`}
+                                >
+                                  🚀 Announcement
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setBannerImageUrl('https://images.unsplash.com/photo-1513151233558-d860c5398176?w=600&auto=format&fit=crop&q=80')}
+                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${
+                                    bannerImageUrl.includes('photo-1513151233')
+                                      ? 'bg-brand-600 text-white border-transparent'
+                                      : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700 font-normal'
+                                  }`}
+                                >
+                                  🎉 Special Promo
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          {bannerImageUrl && (
+                            <div className="relative rounded-lg overflow-hidden border border-brand-100 max-h-[140px] bg-white flex items-center justify-center">
+                              <img 
+                                src={bannerImageUrl} 
+                                alt="Banner preview" 
+                                className="object-cover w-full h-[100px] md:h-[120px]" 
+                                onError={(e) => {
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
                       <div className="space-y-2">
                         <Label htmlFor="subject">Subject Line</Label>
                         <Input 
@@ -3490,9 +3747,11 @@ Encore Portal Admin`;
         if (!open) {
           setSelectedHistory(null);
           setSelectedHistoryRecipientIndex(0);
+          setSelectedHistoryRecipientFilter('all');
+          setSelectedHistoryRecipientSearch('');
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] sm:max-w-[90vw] md:max-w-[85vw] lg:max-w-[1100px] xl:max-w-[1200px] md:h-[90vh] flex flex-col p-6 overflow-hidden">
           <DialogHeader>
             <div className="flex justify-between items-start pr-8">
               <div>
@@ -3589,93 +3848,243 @@ Encore Portal Admin`;
             <Separator />
             
             {/* If we have full rawContacts data, we show exact personalized preview */}
-            {selectedHistory?.rawContacts && selectedHistory.rawContacts.length > 0 ? (
-              <>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-100">
-                    <div className="text-xs text-gray-500 font-medium ml-2">
-                      Viewing exact email sent to recipient {selectedHistoryRecipientIndex + 1} of {selectedHistory.rawContacts.length}
+            {selectedHistory?.rawContacts && selectedHistory.rawContacts.length > 0 ? (() => {
+              const filteredList = selectedHistory.rawContacts
+                .map((rc, originalIdx) => ({ rc, originalIdx }))
+                .filter(({ rc }) => {
+                  if (selectedHistoryRecipientFilter === 'success' && rc.status !== 'success') return false;
+                  if (selectedHistoryRecipientFilter === 'failed' && rc.status !== 'failed') return false;
+                  
+                  if (selectedHistoryRecipientSearch.trim()) {
+                    const query = selectedHistoryRecipientSearch.toLowerCase().trim();
+                    const emailMatches = rc.email?.toLowerCase().includes(query);
+                    const nameMatches = rc.name?.toLowerCase().includes(query);
+                    return emailMatches || nameMatches;
+                  }
+                  
+                  return true;
+                });
+
+              const safeIndex = Math.min(
+                Math.max(0, selectedHistoryRecipientIndex),
+                Math.max(0, filteredList.length - 1)
+              );
+              
+              const activeRecipient = filteredList[safeIndex]?.rc;
+
+              return (
+                <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-6 overflow-hidden mt-2">
+                  {/* Left Column: List & Filter & Search */}
+                  <div className="md:col-span-5 flex flex-col h-[400px] md:h-full bg-gray-50/50 rounded-xl border border-gray-100 p-3 overflow-hidden">
+                    <div className="space-y-2 mb-2 shrink-0">
+                      <div className="flex justify-between items-center">
+                        <p className="text-xs text-gray-500 uppercase font-bold tracking-wider">Recipients List</p>
+                        <Badge variant="outline" className="text-[10px] bg-white text-gray-700">
+                          {filteredList.length} matching
+                        </Badge>
+                      </div>
+                      
+                      {/* Live search */}
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                        <Input
+                          placeholder="Search email or name..."
+                          value={selectedHistoryRecipientSearch}
+                          onChange={(e) => {
+                            setSelectedHistoryRecipientSearch(e.target.value);
+                            setSelectedHistoryRecipientIndex(0);
+                          }}
+                          className="pl-8 h-8 text-xs bg-white"
+                        />
+                      </div>
+                      
+                      {/* filter selectors */}
+                      <div className="grid grid-cols-3 gap-1 p-1 bg-gray-100/80 rounded-lg text-[10px]">
+                        <button
+                          onClick={() => {
+                            setSelectedHistoryRecipientFilter('all');
+                            setSelectedHistoryRecipientIndex(0);
+                          }}
+                          className={`py-1 rounded-md transition-all font-medium text-center ${
+                            selectedHistoryRecipientFilter === 'all'
+                              ? 'bg-white shadow-sm text-brand-900 font-semibold'
+                              : 'text-gray-500 hover:text-gray-900'
+                          }`}
+                        >
+                          All ({selectedHistory.rawContacts.length})
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedHistoryRecipientFilter('success');
+                            setSelectedHistoryRecipientIndex(0);
+                          }}
+                          className={`py-1 rounded-md transition-all font-medium flex items-center justify-center gap-1 ${
+                            selectedHistoryRecipientFilter === 'success'
+                              ? 'bg-white shadow-sm text-green-700 font-semibold'
+                              : 'text-gray-500 hover:text-green-700'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                          Sent ({selectedHistory.rawContacts.filter(c => c.status === 'success').length})
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedHistoryRecipientFilter('failed');
+                            setSelectedHistoryRecipientIndex(0);
+                          }}
+                          className={`py-1 rounded-md transition-all font-medium flex items-center justify-center gap-1 ${
+                            selectedHistoryRecipientFilter === 'failed'
+                              ? 'bg-white shadow-sm text-red-700 font-semibold'
+                              : 'text-gray-500 hover:text-red-700'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                          Error ({selectedHistory.rawContacts.filter(c => c.status === 'failed').length})
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="h-7 text-xs"
-                        onClick={() => setSelectedHistoryRecipientIndex(prev => Math.max(0, prev - 1))}
-                        disabled={selectedHistoryRecipientIndex === 0}
-                      >
-                        Previous
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="h-7 text-xs"
-                        onClick={() => setSelectedHistoryRecipientIndex(prev => Math.min((selectedHistory?.rawContacts?.length || 1) - 1, prev + 1))}
-                        disabled={selectedHistoryRecipientIndex === (selectedHistory?.rawContacts?.length || 1) - 1}
-                      >
-                        Next
-                      </Button>
+
+                    {/* Scrollable list items */}
+                    <div className="flex-grow min-h-0 relative border border-gray-100 rounded-lg bg-white overflow-y-auto">
+                      <div className="p-1 space-y-1">
+                        {filteredList.length > 0 ? (
+                          filteredList.map(({ rc, originalIdx }, idx) => {
+                            const isSelected = idx === safeIndex;
+                            return (
+                              <button
+                                key={originalIdx}
+                                onClick={() => setSelectedHistoryRecipientIndex(idx)}
+                                className={`w-full text-left p-2 rounded-md transition-all flex items-start gap-2.5 text-xs ${
+                                  isSelected
+                                    ? 'bg-brand-50 text-brand-900 border border-brand-200/60 font-medium'
+                                    : 'hover:bg-gray-50 text-gray-700 border border-transparent'
+                                }`}
+                              >
+                                <div className="mt-1 shrink-0">
+                                  {rc.status === 'success' ? (
+                                    <span className="flex w-2 h-2 rounded-full bg-green-500" />
+                                  ) : (
+                                    <span className="flex w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-semibold truncate flex justify-between items-center">
+                                    <span className="truncate">{rc.name || 'Recipient'}</span>
+                                  </div>
+                                  <div className="text-[10px] text-gray-500 truncate">{rc.email}</div>
+                                  {rc.error && (
+                                    <div className="text-[9px] text-red-650 truncate mt-0.5 max-w-full font-normal">
+                                      {rc.error}
+                                    </div>
+                                  )}
+                                </div>
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="py-12 text-center text-xs text-gray-400">
+                            No matching records found.
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-                
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Recipient Details</p>
-                    {(() => {
-                      const rc = selectedHistory.rawContacts[selectedHistoryRecipientIndex];
-                      if (rc.status === 'success') {
-                        return (
-                          <Badge className="bg-green-50 text-green-700 border-green-200 text-[10px] py-0 px-2 h-5">
-                            <CheckCircle2 className="w-3.5 h-3.5 mr-1 shrink-0" />
-                            Success
-                          </Badge>
-                        );
-                      } else if (rc.status === 'failed') {
-                        return (
-                          <Badge className="bg-red-50 text-red-700 border-red-200 text-[10px] py-0 px-2 h-5">
-                            <AlertTriangle className="w-3.5 h-3.5 mr-1 shrink-0" />
-                            Failed
-                          </Badge>
-                        );
-                      }
-                      return null;
-                    })()}
-                  </div>
-                  <div className="p-3 bg-gray-50 rounded-lg border border-gray-100 space-y-2">
-                    <p className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                       <span className="font-semibold">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].email}</span>
-                       <span className="text-gray-500">{selectedHistory.rawContacts[selectedHistoryRecipientIndex].name ? `(${selectedHistory.rawContacts[selectedHistoryRecipientIndex].name})` : ''}</span>
-                    </p>
-                    {selectedHistory.rawContacts[selectedHistoryRecipientIndex].error && (
-                      <div className="text-xs bg-red-50/50 text-red-800 p-2.5 rounded border border-red-100 flex items-start gap-2">
-                        <AlertTriangle className="w-3.5 h-3.5 text-red-650 shrink-0 mt-0.5" />
-                        <div>
-                          <span className="font-medium">Error details:</span>{' '}
-                          <code className="font-mono text-[11px] block mt-1 break-all select-all">
-                            {selectedHistory.rawContacts[selectedHistoryRecipientIndex].error}
-                          </code>
+
+                  {/* Right Column: Mail Preview & error log */}
+                  <div className="md:col-span-7 flex flex-col h-[400px] md:h-full bg-white rounded-xl border border-gray-100 p-3 overflow-hidden">
+                    {activeRecipient ? (
+                      <div className="flex flex-col h-full overflow-hidden">
+                        {/* Upper controls */}
+                        <div className="flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-100 shrink-0 mb-3">
+                          <p className="text-[11px] text-gray-550 font-medium ml-2">
+                            Index {safeIndex + 1} of {filteredList.length} matching
+                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="h-7 text-xs px-2.5"
+                              onClick={() => setSelectedHistoryRecipientIndex(prev => Math.max(0, prev - 1))}
+                              disabled={safeIndex === 0}
+                            >
+                              Prev
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="h-7 text-xs px-2.5"
+                              onClick={() => setSelectedHistoryRecipientIndex(prev => Math.min(filteredList.length - 1, prev + 1))}
+                              disabled={safeIndex === filteredList.length - 1}
+                            >
+                              Next
+                            </Button>
+                          </div>
                         </div>
+
+                        {/* Middle detailed view */}
+                        <div className="flex-grow min-h-0 overflow-y-auto space-y-3.5 pr-1">
+                          {/* Recipient Details Block */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center">
+                              <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider font-semibold">Recipient Details</p>
+                              {activeRecipient.status === 'success' ? (
+                                <Badge className="bg-green-50 text-green-700 border-green-200 text-[9px] py-0 px-1.5 h-4 font-normal">
+                                  <CheckCircle2 className="w-3 h-3 mr-1 shrink-0" />
+                                  Success
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-red-50 text-red-700 border-red-200 text-[9px] py-0 px-1.5 h-4 font-normal">
+                                  <AlertTriangle className="w-3 h-3 mr-1 shrink-0" />
+                                  Failed
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="p-3 bg-gray-50/70 rounded-lg border border-gray-100 text-xs">
+                              <div className="font-bold text-gray-900">{activeRecipient.email}</div>
+                              {activeRecipient.name && <div className="text-gray-500 mt-0.5">({activeRecipient.name})</div>}
+                              
+                              {activeRecipient.error && (
+                                <div className="mt-2 pt-2 border-t border-red-100">
+                                  <div className="text-red-800 font-semibold mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wider">
+                                    <AlertTriangle className="w-3.5 h-3.5 text-red-650" />
+                                    Error Technical Message:
+                                  </div>
+                                  <code className="block text-[10px] font-mono bg-white p-2 border border-red-100 rounded text-red-700 break-all select-all whitespace-pre-wrap max-h-[100px] overflow-y-auto">
+                                    {activeRecipient.error}
+                                  </code>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Subject line */}
+                          <div className="space-y-1">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider font-semibold">Subject</p>
+                            <div className="p-2.5 bg-gray-50/70 rounded-lg border border-gray-100 text-xs font-semibold text-gray-900">
+                              {replacePlaceholders(selectedHistory.subject, activeRecipient, false)}
+                            </div>
+                          </div>
+
+                          {/* Email Body text */}
+                          <div className="space-y-1 pb-2">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider font-semibold">Personalized Email Body</p>
+                            <div 
+                              className="text-xs text-gray-750 p-3 bg-gray-50/70 rounded-lg border border-gray-100 whitespace-pre-wrap leading-relaxed max-h-[180px] overflow-y-auto font-sans"
+                              dangerouslySetInnerHTML={{ __html: replacePlaceholders(selectedHistory.body, activeRecipient, true) }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-grow flex flex-col items-center justify-center text-gray-400 border border-dashed rounded-xl p-8 bg-gray-50/50">
+                        <Mail className="w-8 h-8 text-gray-300 mb-2" />
+                        <p className="text-xs">No recipient is selected matching the filter.</p>
                       </div>
                     )}
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Subject</p>
-                  <p className="text-sm font-medium p-3 bg-gray-50 rounded-lg border border-gray-100">
-                    {replacePlaceholders(selectedHistory.subject, selectedHistory.rawContacts[selectedHistoryRecipientIndex])}
-                  </p>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between items-end">
-                    <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Message Content</p>
-                  </div>
-                  <div className="text-sm text-gray-600 p-4 bg-gray-50 rounded-lg border border-gray-100 whitespace-pre-wrap max-h-[300px] overflow-y-auto leading-relaxed">
-                    {replacePlaceholders(selectedHistory.body, selectedHistory.rawContacts[selectedHistoryRecipientIndex])}
-                  </div>
-                </div>
-              </>
-            ) : (
+              );
+            })() : (
               /* Fallback for older blast records without rawContacts */
               <>
                 <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg flex gap-3 text-sm">
@@ -3730,137 +4139,34 @@ Encore Portal Admin`;
               This is how your email will look to recipients. We've used sample data for placeholders.
             </DialogDescription>
           </DialogHeader>
-          <div className="mt-4 border rounded-lg overflow-hidden bg-gray-100 p-4 flex justify-center">
+          <div className="mt-4 border rounded-lg overflow-y-auto max-h-[60vh] bg-gray-100 p-4 flex justify-center">
             {(() => {
               const previewSubject = subject || '';
               const previewBody = body || '';
-              const isBdayPreview = previewSubject.toLowerCase().includes('birthday') || previewBody.toLowerCase().includes('birthday');
-              const currentYear = new Date().getFullYear();
               
-              const replacedBody = previewBody
-                ? previewBody.replace(/#firstname/gi, 'JEFFREY')
-                             .replace(/#yearmodel/gi, '2024')
-                             .replace(/#unit/gi, 'Toyota Fortuner')
-                             .replace(/#plate/gi, 'ABC 1234')
-                             .replace(/#expiry/gi, 'Dec 31, 2026')
-                             .replace(/#amount/gi, '15,000.00')
-                             .replace(/#ddate/gi, 'April 15, 2026')
-                             .replace(/#periodicins/gi, '12,500.00')
-                : 'No content to preview.';
+              const sampleContact: Contact = {
+                id: 'sample-id',
+                email: 'jeffrey@example.com',
+                name: 'JEFFREY DAM',
+                firstname: 'JEFFREY',
+                yearmodel: '2024',
+                unit: 'Toyota Fortuner',
+                plate: 'ABC 1234',
+                expiry: 'Dec 31, 2026',
+                amount: '15000',
+                ddate: 'April 15, 2026',
+                periodicins: '12500'
+              };
 
-              if (isBdayPreview) {
-                return (
-                  <div className="bg-white w-full max-w-[600px] shadow-sm rounded-xl overflow-hidden border border-gray-200 font-sans">
-                    {/* Corporate Branding Header */}
-                    <div className="bg-white p-6 border-b border-gray-100 flex flex-col items-center justify-center">
-                      <img 
-                        src="/assets/img/logo.png" 
-                        alt="Encore Logo" 
-                        className="h-12 w-auto object-contain"
-                        referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                          const sibling = e.currentTarget.nextElementSibling;
-                          if (sibling) {
-                            sibling.classList.remove('hidden');
-                            sibling.classList.add('flex');
-                          }
-                        }}
-                      />
-                      <div className="hidden flex-col items-center">
-                        <h1 className="text-xl font-black tracking-[4px] text-[#102CA4] m-0">ENCORE</h1>
-                        <p className="text-gray-500 text-[9px] font-bold tracking-[1.5px] uppercase m-0 mt-1">Leasing & Finance Corp.</p>
-                      </div>
-                    </div>
+              const replacedSubject = previewSubject ? replacePlaceholders(previewSubject, sampleContact, false) : '';
+              const replacedBody = previewBody ? replacePlaceholders(previewBody, sampleContact, true) : 'No content to preview.';
 
-                    {/* Celebration Banner */}
-                    <div className="bg-gradient-to-r from-[#102CA4] to-[#1d3dbd] p-8 text-center">
-                      <div className="inline-block bg-white/15 border border-white/30 px-4 py-1.5 rounded-full">
-                        <span className="text-[#FFDF00] text-[11px] font-bold tracking-[2px] uppercase">🎂 BIRTHDAY GREETING</span>
-                      </div>
-                    </div>
-                    
-                    {/* Festive Gold Stripe */}
-                    <div className="h-[5px] bg-gradient-to-r from-[#D4AF37] via-[#F3E5AB] to-[#D4AF37]"></div>
-                    
-                    {/* Content Card */}
-                    <div className="p-10 bg-white">
-                      <div className="text-5xl text-center mb-6">🎉</div>
-                      <div className="whitespace-pre-wrap text-[15px] text-gray-700 leading-relaxed text-left">
-                        {replacedBody}
-                      </div>
-                      
-                      {/* Encouragement Block */}
-                      <div className="border-l-4 border-[#102CA4] bg-brand-50 p-4 rounded-r-lg text-left mt-8 mb-6">
-                        <p className="m-0 text-xs text-brand-700 font-semibold italic leading-relaxed">
-                          "May this special day bring you endless joy, success, and prosperity in all your endeavors. We are truly honored to have you as a valued part of our Encore family!"
-                        </p>
-                      </div>
-
-                      <div className="mt-10 pt-6 border-t border-gray-100 text-left">
-                        <p className="m-0 text-sm text-gray-600 font-semibold">Warmest regards,</p>
-                        <p className="m-1 text-sm text-brand-600 font-extrabold">Encore Leasing & Finance Corp. Family</p>
-                      </div>
-                    </div>
-                    
-                    {/* Footer */}
-                    <div className="bg-gray-50 p-6 text-center border-t border-gray-100">
-                      <div className="mb-4">
-                        <a href="https://encorefinancials.com/" className="text-brand-600 hover:text-brand-700 no-underline text-xs font-bold leading-none border-b border-brand-600 pb-0.5">Visit our Website</a>
-                      </div>
-                      <p className="text-[10px] text-gray-500 m-0">&copy; {currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
-                      <p className="text-[9px] text-gray-400 mt-2 leading-relaxed">
-                        (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
-                        Encore Building, Maharlika Highway, Cabanatuan City
-                      </p>
-                    </div>
-                  </div>
-                );
-              }
-
+              const htmlContent = generateEmailHtml(replacedSubject, replacedBody);
               return (
-                <div className="bg-white w-full max-w-[600px] shadow-sm rounded-lg overflow-hidden border border-gray-200">
-                  {/* Corporate Branding Header */}
-                  <div className="bg-white p-6 border-b-2 border-[#102CA4] flex flex-col items-center justify-center">
-                    <img 
-                      src="/assets/img/logo.png" 
-                      alt="Encore Logo" 
-                      className="h-12 w-auto object-contain"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        const sibling = e.currentTarget.nextElementSibling;
-                        if (sibling) {
-                          sibling.classList.remove('hidden');
-                          sibling.classList.add('flex');
-                        }
-                      }}
-                    />
-                    <div className="hidden flex-col items-center">
-                      <h1 className="text-xl font-black tracking-[4px] text-[#102CA4] m-0">ENCORE</h1>
-                      <p className="text-gray-500 text-[9px] font-bold tracking-[1.5px] uppercase m-0 mt-1">Leasing & Finance Corp.</p>
-                    </div>
-                  </div>
-                  <div className="p-10 bg-white min-h-[200px]">
-                    <div className="whitespace-pre-wrap text-gray-800 leading-relaxed text-base text-left">
-                      {replacedBody}
-                    </div>
-                    <div className="mt-10 pt-6 border-t border-gray-100 text-left">
-                      <p className="m-0 text-sm text-gray-600 font-semibold">Best regards,</p>
-                      <p className="m-1 text-sm text-brand-600 font-bold">Encore Leasing & Finance Corp. Team</p>
-                    </div>
-                  </div>
-                  <div className="bg-gray-50 p-6 text-center border-t border-gray-100">
-                    <div className="mb-4">
-                      <a href="https://encorefinancials.com/" className="text-brand-600 no-underline text-xs font-semibold">Visit our Website</a>
-                    </div>
-                    <p className="text-[10px] text-gray-500 m-0">&copy; {currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
-                    <p className="text-[9px] text-gray-400 mt-2 leading-relaxed">
-                      (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
-                      Encore Building, Maharlika Highway, Cabanatuan City
-                    </p>
-                  </div>
-                </div>
+                <div 
+                  className="w-full max-w-[600px] shadow-sm bg-white rounded-lg overflow-hidden"
+                  dangerouslySetInnerHTML={{ __html: htmlContent }} 
+                />
               );
             })()}
           </div>
