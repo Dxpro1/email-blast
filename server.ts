@@ -177,7 +177,7 @@ async function processEmailMessages(apiKey: string, messages: any[]): Promise<an
     let emailHtml = msg.body;
     const possibleUrls = [
       'https://encorefinancials.com/assets/images/application-settings/logo-dark.png',
-      'https://encorefinancials.com/wp-content/uploads/2021/06/Encore-Logo-1.png',
+      'https://encorefinancials.com/wp-content/uploads/2021/06/ELFC-Logo-1.png',
       '/assets/img/logo.png',
       '/assets/img/logo.svg',
       'logo.png',
@@ -204,7 +204,7 @@ async function processEmailMessages(apiKey: string, messages: any[]): Promise<an
 
   console.log(`Attempting to send ${validMessages.length} valid message(s) via Brevo API...`);
   const fallbackSenderAddress = 'no-reply@encorefinancials.com';
-  const fromName = 'Encore Leasing and Finance Corp.';
+  const fromName = 'ELFC';
   const fromAddress = process.env.SMTP_FROM || fromName; // just in case
 
   for (const msg of validMessages) {
@@ -212,7 +212,7 @@ async function processEmailMessages(apiKey: string, messages: any[]): Promise<an
       await new Promise(resolve => setTimeout(resolve, 500));
 
       const payload = {
-        sender: { name: "Encore Financials", email: fallbackSenderAddress },
+        sender: { name: "ELFC Financials", email: fallbackSenderAddress },
         to: [{ email: msg.to }],
         subject: msg.subject,
         htmlContent: msg.htmlBody
