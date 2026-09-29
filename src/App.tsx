@@ -153,9 +153,20 @@ Should you have any clarification or require further assistance, you may call or
     id: 'pdc',
     name: 'PDC',
     subject: 'PDC Reminder - Encore Leasing & Finance Corp.',
-    body: `Hi Ma'am/Sir , #firstname just a gentle reminder from Encore Leasing and Finance Corp., that your issued check for insurance payment amounting to #amount  will be deposited on #ddate. If there is no issued check, kindly settie insurance premium via Gcash, 7/11, Maya, Cebuana Lhuilier, ECPay, & BDO. In case of non-payment of insurance premium to ELFC, the company shall apply your payment of the monthly loan amortization to the unpaid insurance premium.
+    body: `Dear <b>#firstname</b>,
 
-Should you have any clarification, you may call or text (044) 940-5625 or 0919-0677719.`
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>PHP #amount</b>. If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
+
+If you have not issued a check, you may conveniently settle your insurance premium through any of our available payment channels, including <b>GCash, 7-Eleven, Maya, Cebuana Lhuillier, ECPay, and BDO</b>.
+
+To avoid any inconvenience, we kindly ask that you settle your insurance premium promptly. <b>Please note that if the insurance premium remains unpaid, the post-dated check (PDC) issued for your monthly loan amortization will be applied toward the outstanding insurance premium instead.</b>
+
+For any questions or assistance, feel free to call or text us at <b>(044) 940-5625</b> or <b>0919-067-7719</b>.
+
+Thank you, <b>#firstname</b>! We truly appreciate your continued trust in <b>Encore Leasing and Finance Corp.</b> 💙
+
+Warm regards,
+<b>Encore Leasing and Finance Corp.</b>`
   },
   {
     id: 'releases',
