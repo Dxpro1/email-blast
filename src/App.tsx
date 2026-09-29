@@ -108,7 +108,7 @@ interface AppUser {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  role: 'super_admin' | 'user';
+  role: 'super_admin' | 'marketing' | 'user';
   status: 'active' | 'pending' | 'inactive';
   createdAt?: any;
 }
@@ -215,6 +215,12 @@ To avoid any inconvenience, we kindly ask that you settle your loan amortization
 For any questions or assistance, feel free to call or text us at <b>(044) 940-5625</b> or <b>0919-067-7719</b>.
 
 Thank you, <b>#firstname</b>, and we truly appreciate your continued trust in <b>Encore Leasing and Finance Corp.</b> 😊`
+  },
+  {
+    id: 'marketing',
+    name: 'Marketing Flyer / Promotion',
+    subject: 'Special Promo - Encore Leasing & Finance Corp.',
+    body: ``
   }
 ];
 
@@ -274,13 +280,14 @@ export default function App() {
   const [isConfirmClearOpen, setIsConfirmClearOpen] = useState(false);
 
   const isSuperAdmin = userProfile?.role === 'super_admin' || user?.email?.toLowerCase() === 'encorefinancials@gmail.com';
+  const isMarketing = userProfile?.role === 'marketing';
 
   // User Creation State
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createUserName, setCreateUserName] = useState('');
   const [createUserEmail, setCreateUserEmail] = useState('');
   const [createUserPassword, setCreateUserPassword] = useState('');
-  const [createUserRole, setCreateUserRole] = useState<'super_admin' | 'user'>('user');
+  const [createUserRole, setCreateUserRole] = useState<'super_admin' | 'marketing' | 'user'>('user');
   const [isCreatingUser, setIsCreatingUser] = useState(false);
 
   // User Editing State
@@ -740,6 +747,27 @@ export default function App() {
     } catch (err) {
       console.error("Error setting user status:", err);
       toast.error("Failed to update user status");
+    }
+  };
+
+  const handleToggleUserRole = async (targetUser: AppUser) => {
+    if (targetUser.uid === user?.uid) {
+      toast.error("You cannot change your own role.");
+      return;
+    }
+    const roles: ('super_admin' | 'marketing' | 'user')[] = ['user', 'marketing', 'super_admin'];
+    const currentIndex = roles.indexOf(targetUser.role || 'user');
+    const nextRole = roles[(currentIndex + 1) % roles.length];
+    
+    try {
+      await setDoc(doc(db, 'users', targetUser.uid), {
+        role: nextRole,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+      toast.success(`Role updated: ${targetUser.email} is now ${nextRole.toUpperCase()}`);
+    } catch (err) {
+      console.error("Error setting user role:", err);
+      toast.error("Failed to update user role");
     }
   };
 
@@ -2789,7 +2817,7 @@ Encore Portal Admin`;
                               <SelectValue placeholder="Pre-written Content" />
                             </SelectTrigger>
                             <SelectContent>
-                              {TEMPLATES.map(t => (
+                              {TEMPLATES.filter(t => !isMarketing || t.id === 'marketing').map(t => (
                                 <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                               ))}
                             </SelectContent>
@@ -3720,6 +3748,16 @@ Encore Portal Admin`;
                                                       <span>Approve / Grant</span>
                                                     </>
                                                   )}
+                                                </Button>
+
+                                                <Button
+                                                  variant="outline"
+                                                  size="sm"
+                                                  type="button"
+                                                  onClick={() => handleToggleUserRole(u)}
+                                                  className="h-8 text-[11px] font-medium border-blue-200 text-blue-700 hover:bg-blue-50"
+                                                >
+                                                  Role: {u.role?.toUpperCase() || 'USER'}
                                                 </Button>
 
                                                 <Button
