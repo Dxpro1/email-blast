@@ -155,7 +155,7 @@ Should you have any clarification or require further assistance, you may call or
     subject: 'PDC Reminder - Encore Leasing & Finance Corp.',
     body: `Dear <b>#firstname</b>,
 
-Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>PHP #amount</b>. If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>#amount</b>. If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
 
 If you have not issued a check, you may conveniently settle your insurance premium through any of our available payment channels, including <b>GCash, 7-Eleven, Maya, Cebuana Lhuillier, ECPay, and BDO</b>.
 
