@@ -42,6 +42,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
+import EmailEditor, { EditorRef } from 'react-email-editor';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '@/components/ui/badge';
@@ -345,6 +346,10 @@ export default function App() {
       if (imageInputRef.current) imageInputRef.current.value = '';
     }
   };
+
+  const emailEditorRef = useRef<EditorRef>(null);
+  const [isVisualEditorOpen, setIsVisualEditorOpen] = useState(false);
+  const [visualDesign, setVisualDesign] = useState<any>(null);
 
   const dashboardStats = useMemo(() => {
     let totalSent = 0;
@@ -1410,8 +1415,13 @@ Encore Portal Admin`;
     const isBirthday = templateStyle === 'birthday' || subjectText.toLowerCase().includes('birthday') || bodyText.toLowerCase().includes('birthday');
     const isMarketing = templateStyle === 'marketing';
     const isFlyer = templateStyle === 'flyer';
+    const isVisual = templateStyle === 'visual';
     const isAnnouncement = templateStyle === 'announcement';
     const currentYear = new Date().getFullYear();
+
+    if (isVisual) {
+      return bodyText; // the visual builder outputs raw HTML
+    }
 
     if (isBirthday) {
       return `
@@ -2876,6 +2886,7 @@ Encore Portal Admin`;
                               {!isMarketing && <SelectItem value="standard">Standard Notice</SelectItem>}
                               <SelectItem value="marketing">Marketing Theme (With Text)</SelectItem>
                               <SelectItem value="flyer">Flyer Theme (100% Images)</SelectItem>
+                              <SelectItem value="visual">Visual Builder (Drag & Drop)</SelectItem>
                               {!isMarketing && <SelectItem value="announcement">Official Announcement</SelectItem>}
                               {!isMarketing && <SelectItem value="birthday">Birthday Greeting</SelectItem>}
                             </SelectContent>
@@ -3024,25 +3035,39 @@ Encore Portal Admin`;
                                 </Button>
                               </>
                             )}
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              onClick={generateContent}
-                              disabled={isGenerating}
-                              className="text-brand-600 hover:text-brand-700 hover:bg-brand-50"
-                            >
-                              {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                              Optimize with AI
-                            </Button>
+                            {templateStyle !== 'visual' && (
+                              <Button 
+                                variant="ghost" 
+                                size="sm" 
+                                onClick={generateContent}
+                                disabled={isGenerating}
+                                className="text-brand-600 hover:text-brand-700 hover:bg-brand-50"
+                              >
+                                {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                                Optimize with AI
+                              </Button>
+                            )}
                           </div>
                         </div>
-                        <Textarea 
-                          id="body" 
-                          placeholder="Write your email here..." 
-                          className="min-h-[300px] border-gray-200 focus:ring-brand-500 leading-relaxed"
-                          value={body}
-                          onChange={(e) => setBody(e.target.value)}
-                        />
+                        {templateStyle === 'visual' ? (
+                          <div className="border border-dashed border-gray-300 rounded-lg p-10 flex flex-col items-center justify-center bg-gray-50 text-center min-h-[300px]">
+                            <LayoutDashboard className="w-10 h-10 text-brand-400 mb-4" />
+                            <h3 className="text-lg font-semibold text-gray-900 mb-2">Drag & Drop Visual Builder</h3>
+                            <p className="text-sm text-gray-500 max-w-sm mb-6">Create stunning emails using our professional block editor. Drag images, buttons, and text anywhere you like.</p>
+                            <Button onClick={() => setIsVisualEditorOpen(true)} className="bg-brand-600 hover:bg-brand-700">
+                              <Sparkles className="w-4 h-4 mr-2" />
+                              Open Builder
+                            </Button>
+                          </div>
+                        ) : (
+                          <Textarea 
+                            id="body" 
+                            placeholder="Write your email here..." 
+                            className="min-h-[300px] border-gray-200 focus:ring-brand-500 leading-relaxed"
+                            value={body}
+                            onChange={(e) => setBody(e.target.value)}
+                          />
+                        )}
                         {missingPlaceholders.length > 0 && contacts.length > 0 && (
                           <div className="flex items-start gap-2 mt-3 p-3 bg-red-50 rounded-lg text-red-800 border border-red-200 shadow-sm">
                             <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
@@ -4304,6 +4329,51 @@ Encore Portal Admin`;
       </Dialog>
 
       {/* Template Preview Dialog */}
+      <Dialog open={isVisualEditorOpen} onOpenChange={setIsVisualEditorOpen}>
+        <DialogContent className="max-w-[100vw] w-screen h-screen max-h-[100vh] p-0 m-0 rounded-none border-0 flex flex-col bg-gray-100">
+          <div className="bg-brand-900 text-white px-4 py-3 flex items-center justify-between shadow-md z-10 shrink-0">
+            <div className="flex items-center gap-2">
+              <LayoutDashboard className="w-5 h-5 text-brand-200" />
+              <h2 className="font-semibold text-sm">Visual Email Builder</h2>
+            </div>
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="sm" onClick={() => setIsVisualEditorOpen(false)} className="text-brand-100 hover:text-white hover:bg-brand-800">
+                Cancel
+              </Button>
+              <Button size="sm" onClick={() => {
+                if (emailEditorRef.current) {
+                  emailEditorRef.current.editor.exportHtml((data) => {
+                    const { design, html } = data;
+                    setVisualDesign(design);
+                    setBody(html); // Save compiled HTML into body
+                    setIsVisualEditorOpen(false);
+                    toast.success('Design saved successfully!');
+                  });
+                }
+              }} className="bg-white text-brand-900 hover:bg-brand-50 font-bold">
+                Save & Apply Design
+              </Button>
+            </div>
+          </div>
+          <div className="flex-1 w-full relative overflow-hidden">
+            <EmailEditor 
+              ref={emailEditorRef} 
+              onLoad={() => {
+                if (visualDesign && emailEditorRef.current) {
+                  emailEditorRef.current.editor.loadDesign(visualDesign);
+                }
+              }}
+              options={{
+                appearance: {
+                  theme: 'light',
+                },
+              }}
+              style={{ height: '100%', width: '100%' }}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
