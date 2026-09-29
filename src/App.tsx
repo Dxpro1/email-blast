@@ -1467,7 +1467,7 @@ Encore Portal Admin`;
         <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
           <div style="white-space: pre-wrap; font-size: 15px; color: #1f2937;">${bodyText}</div>
           <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
-            <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Best regards,</p>
+            <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Warm regards,</p>
             <p style="margin: 5px 0 0 0; font-size: 14px; color: #102CA4; font-weight: 700;">Encore Leasing & Finance Corp.</p>
           </div>
         </div>
