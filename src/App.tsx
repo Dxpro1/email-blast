@@ -12,6 +12,7 @@ import {
   Loader2,
   ChevronRight,
   FileUp,
+  ImagePlus,
   BookOpen,
   Info,
   LogOut,
@@ -62,9 +63,10 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { auth, db, signInWithGoogle, signInWithEmailAndPassword, createUserWithEmailAndPassword, checkConnection, getSecondaryAuth, getSecondaryDb, sendPasswordResetEmail, sendEmailVerification } from './lib/firebase';
+import { auth, db, storage, signInWithGoogle, signInWithEmailAndPassword, createUserWithEmailAndPassword, checkConnection, getSecondaryAuth, getSecondaryDb, sendPasswordResetEmail, sendEmailVerification } from './lib/firebase';
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs, where } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 // Initialize Gemini is handled server-side to protect keys and prevent browser environment crashes
 
@@ -308,9 +310,41 @@ export default function App() {
   const [isScheduling, setIsScheduling] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [importedFileName, setImportedFileName] = useState('');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvData, setCsvData] = useState<any[]>([]);
   const [csvMapping, setCsvMapping] = useState<Record<string, string>>({});
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select a valid image file.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size must be less than 5MB.');
+      return;
+    }
+    
+    setIsUploadingImage(true);
+    const toastId = toast.loading('Uploading image...');
+    
+    try {
+      const storageRef = ref(storage, `flyers/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`);
+      await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(storageRef);
+      setBody(prev => prev ? `${prev}\n${downloadURL}` : downloadURL);
+      toast.success('Image uploaded and URL inserted!', { id: toastId });
+    } catch (err: any) {
+      console.error('Upload error:', err);
+      toast.error(err.message || 'Failed to upload image.', { id: toastId });
+    } finally {
+      setIsUploadingImage(false);
+      if (imageInputRef.current) imageInputRef.current.value = '';
+    }
+  };
 
   const dashboardStats = useMemo(() => {
     let totalSent = 0;
@@ -2968,16 +3002,39 @@ Encore Portal Admin`;
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
                           <Label htmlFor="body">Message Body</Label>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={generateContent}
-                            disabled={isGenerating}
-                            className="text-brand-600 hover:text-brand-700 hover:bg-brand-50"
-                          >
-                            {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
-                            Optimize with AI
-                          </Button>
+                          <div className="flex items-center gap-2">
+                            {templateStyle === 'flyer' && (
+                              <>
+                                <input 
+                                  type="file" 
+                                  ref={imageInputRef} 
+                                  onChange={handleImageUpload} 
+                                  accept="image/*" 
+                                  className="hidden" 
+                                />
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  onClick={() => imageInputRef.current?.click()}
+                                  disabled={isUploadingImage}
+                                  className="text-brand-600 border-brand-200 hover:bg-brand-50 h-8"
+                                >
+                                  {isUploadingImage ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ImagePlus className="w-4 h-4 mr-2" />}
+                                  Upload Flyer
+                                </Button>
+                              </>
+                            )}
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              onClick={generateContent}
+                              disabled={isGenerating}
+                              className="text-brand-600 hover:text-brand-700 hover:bg-brand-50"
+                            >
+                              {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Sparkles className="w-4 h-4 mr-2" />}
+                              Optimize with AI
+                            </Button>
+                          </div>
                         </div>
                         <Textarea 
                           id="body" 

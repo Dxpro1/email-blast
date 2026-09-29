@@ -9,11 +9,13 @@ import {
   sendEmailVerification
 } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 const config = firebaseConfig as any;
 export const db = getFirestore(app, config.firestoreDatabaseId || 'ai-studio-69a653c2-f279-40ef-a977-9be443b34f45');
+export const storage = getStorage(app);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
