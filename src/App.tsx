@@ -139,8 +139,8 @@ const TEMPLATES = [
   {
     id: 'insurance',
     name: 'INSURANCE',
-    subject: 'Insurance Expiry Notice - ELFC',
-    body: `Hi Ma'am/Sir #firstname we would like to inform you that the insurance of your vehicle(s) mortgaged to us is due to expire. To ensure your continued, protection ELFC shall renew the insurance policy of your vehicle if you failed to provide your own insurance policy 5 working days before expiry with details given below: 
+    subject: 'Insurance Expiry Notice - Encore Leasing & Finance Corp.',
+    body: `Hi Ma'am/Sir #firstname we would like to inform you that the insurance of your vehicle(s) mortgaged to us is due to expire. To ensure your continued, protection Encore Leasing & Finance Corp. shall renew the insurance policy of your vehicle if you failed to provide your own insurance policy 5 working days before expiry with details given below: 
 
 Year Model: #yearmodel
 Unit : #unit 
@@ -152,27 +152,27 @@ Should you have any clarification or require further assistance, you may call or
   {
     id: 'pdc',
     name: 'PDC',
-    subject: 'PDC Reminder - ELFC',
-    body: `Hi Ma'am/Sir , #firstname just a gentle reminder from ELFC, that your issued check for insurance payment amounting to #amount  will be deposited on #ddate. If there is no issued check, kindly settie insurance premium via Gcash, 7/11, Maya, Cebuana Lhuilier, ECPay, & BDO. In case of non-payment of insurance premium to ELFC, the company shall apply your payment of the monthly loan amortization to the unpaid insurance premium.
+    subject: 'PDC Reminder - Encore Leasing & Finance Corp.',
+    body: `Hi Ma'am/Sir , #firstname just a gentle reminder from Encore Leasing and Finance Corp., that your issued check for insurance payment amounting to #amount  will be deposited on #ddate. If there is no issued check, kindly settie insurance premium via Gcash, 7/11, Maya, Cebuana Lhuilier, ECPay, & BDO. In case of non-payment of insurance premium to ELFC, the company shall apply your payment of the monthly loan amortization to the unpaid insurance premium.
 
 Should you have any clarification, you may call or text (044) 940-5625 or 0919-0677719.`
   },
   {
     id: 'releases',
     name: 'Booked Accounts / Releases',
-    subject: 'Thank You - ELFC',
-    body: `Maraming Salamat #firstname! Masaya po kami na kayo ay aming napagsilbihan. ELFC`
+    subject: 'Thank You - Encore Leasing & Finance Corp.',
+    body: `Maraming Salamat #firstname! Masaya po kami na kayo ay aming napagsilbihan. Encore Leasing & Finance Corp.`
   },
   {
     id: 'birthday',
     name: 'Birthday',
     subject: 'Happy Birthday!',
-    body: `Happy Birthday #firstname! We wanted to take a moment to send you our warmest wishes. We hope your special day is filled with joy, laughter, and everything you love. Warmest regards from your ELFC Family!`
+    body: `Happy Birthday #firstname! We wanted to take a moment to send you our warmest wishes. We hope your special day is filled with joy, laughter, and everything you love. Warmest regards from your Encore Leasing & Finance Corp. Family!`
   },
   {
     id: 'due_date',
     name: 'Due Date',
-    subject: 'Payment Reminder - ELFC',
+    subject: 'Payment Reminder - Encore Leasing & Finance Corp.',
     body: `Good Day Ms./Mr. #firstname, Just a gentle reminder that your monthly amortization amounting to #periodicins is due on #ddate. Kindly settle your amortization on time to avoid penalties. For inquiries, call us at  0919-077-2664. If payment has been made, please disregard this message`
   }
 ];
@@ -833,7 +833,7 @@ export default function App() {
       const greetingLine = `Hi ${createUserName},`;
       const emailBody = `${greetingLine}
         
-Your new account for the ELFC portal has been created.
+Your new account for the Encore Leasing & Finance Corp. portal has been created.
         
 Login URL: ${window.location.origin}
 Your Login Email: ${createUserEmail}
@@ -842,7 +842,7 @@ Your Temporary Password: ${createUserPassword}
 Please log in and change your password as soon as possible.
         
 Warmest regards,
-ELFC Portal Admin`;
+Encore Portal Admin`;
 
       const formattedHtml = emailBody.replace(/\n/g, '<br/>');
 
@@ -853,7 +853,7 @@ ELFC Portal Admin`;
           body: JSON.stringify({
             messages: [{
               to: createUserEmail,
-              subject: 'Your New Account - ELFC Portal',
+              subject: 'Your New Account - Encore Portal',
               body: formattedHtml
             }]
           })
@@ -1305,7 +1305,7 @@ ELFC Portal Admin`;
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); background-color: #ffffff;">
           <!-- Corporate Branding Header -->
           <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #f1f5f9;">
-            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="ELFC" style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Celebration Banner -->
@@ -1326,13 +1326,13 @@ ELFC Portal Admin`;
             <!-- Encouragement Block -->
             <div style="background-color: #f0f2fc; border-left: 4px solid #102CA4; padding: 18px; border-radius: 0 8px 8px 0; text-align: left; margin-top: 35px; margin-bottom: 25px;">
               <p style="margin: 0; font-size: 14px; color: #0d238f; font-weight: 600; font-style: italic; line-height: 1.6;">
-                "May this special day bring you endless joy, success, and prosperity in all your endeavors. We are truly honored to have you as a valued part of our ELFC family!"
+                "May this special day bring you endless joy, success, and prosperity in all your endeavors. We are truly honored to have you as a valued part of our Encore family!"
               </p>
             </div>
 
             <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #f1f5f9; text-align: left;">
               <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Warmest regards,</p>
-              <p style="margin: 5px 0 0 0; font-size: 15px; color: #102CA4; font-weight: 700;">ELFC Family</p>
+              <p style="margin: 5px 0 0 0; font-size: 15px; color: #102CA4; font-weight: 700;">Encore Leasing & Finance Corp. Family</p>
             </div>
           </div>
           
@@ -1341,10 +1341,10 @@ ELFC Portal Admin`;
             <div style="margin-bottom: 18px;">
               <a href="https://encorefinancials.com/" style="color: #102CA4; text-decoration: none; font-size: 12px; font-weight: 700; letter-spacing: 0.5px; border-bottom: 1.5px solid #102CA4; padding-bottom: 2px;">Visit our Website</a>
             </div>
-            <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${currentYear} ELFC All rights reserved.</p>
+            <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
             <p style="margin: 8px 0 0 0; font-size: 10px; color: #94a3b8; line-height: 1.6;">
               (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
-              ELFC Building, Maharlika Highway, Cabanatuan City
+              Encore Building, Maharlika Highway, Cabanatuan City
             </p>
           </div>
         </div>
@@ -1356,7 +1356,7 @@ ELFC Portal Admin`;
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #f4f7f6;">
           <!-- Header -->
           <div style="background-color: #102CA4; padding: 30px 20px; text-align: center;">
-            <img src="https://encorefinancials.com/assets/images/application-settings/logo-light.png" alt="ELFC" style="height: 50px; width: auto; max-width: 100%; display: inline-block; filter: brightness(0) invert(1);" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-light.png" alt="Encore Leasing & Finance Corp." style="height: 50px; width: auto; max-width: 100%; display: inline-block; filter: brightness(0) invert(1);" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Hero Image area (Optional/Abstract) -->
@@ -1383,7 +1383,7 @@ ELFC Portal Admin`;
           <!-- Simple Footer -->
           <div style="padding: 20px; text-align: center;">
             <p style="margin: 0; font-size: 12px; color: #718096; line-height: 1.6;">
-              ELFC<br/>
+              Encore Leasing & Finance Corp.<br/>
               Maharlika Highway, Cabanatuan City<br/>
               <br/>
               <a href="#" style="color: #4a5568; text-decoration: underline;">Unsubscribe</a> | <a href="https://encorefinancials.com/" style="color: #4a5568; text-decoration: underline;">Website</a>
@@ -1402,7 +1402,7 @@ ELFC Portal Admin`;
           </div>
           
           <div style="padding: 40px 40px 20px 40px; border-bottom: 2px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between;">
-            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="ELFC" style="height: 45px; width: auto;" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore" style="height: 45px; width: auto;" referrerPolicy="no-referrer" />
           </div>
           
           <div style="padding: 40px;">
@@ -1419,13 +1419,13 @@ ELFC Portal Admin`;
             <div style="margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 20px;">
               <p style="font-size: 14px; color: #718096; margin: 0;">Sincerely,</p>
               <p style="font-size: 15px; color: #2d3748; font-weight: bold; margin: 4px 0 0 0;">The Management Team</p>
-              <p style="font-size: 13px; color: #102CA4; margin: 2px 0 0 0;">ELFC</p>
+              <p style="font-size: 13px; color: #102CA4; margin: 2px 0 0 0;">Encore Leasing & Finance Corp.</p>
             </div>
           </div>
           
           <div style="background-color: #f7fafc; padding: 20px 40px; text-align: center; border-top: 1px solid #edf2f7;">
             <p style="font-size: 11px; color: #a0aec0; margin: 0;">
-              &copy; ${currentYear} ELFC All rights reserved.
+              &copy; ${currentYear} Encore Leasing & Finance Corp. All rights reserved.
             </p>
           </div>
         </div>
@@ -1436,23 +1436,23 @@ ELFC Portal Admin`;
       <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); background-color: #ffffff;">
         <!-- Corporate Branding Header -->
         <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 3px solid #102CA4;">
-          <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="ELFC" style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+          <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
         </div>
         <div style="padding: 40px 30px; line-height: 1.8; background-color: white;">
           <div style="white-space: pre-wrap; font-size: 15px; color: #1f2937;">${bodyText}</div>
           <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #f1f5f9;">
             <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Best regards,</p>
-            <p style="margin: 5px 0 0 0; font-size: 14px; color: #102CA4; font-weight: 700;">ELFC Team</p>
+            <p style="margin: 5px 0 0 0; font-size: 14px; color: #102CA4; font-weight: 700;">Encore Leasing & Finance Corp. Team</p>
           </div>
         </div>
         <div style="background-color: #f8fafc; padding: 25px; text-align: center; border-top: 1px solid #e2e8f0;">
           <div style="margin-bottom: 15px;">
             <a href="https://encorefinancials.com/" style="color: #102CA4; text-decoration: none; font-size: 12px; font-weight: 600;">Visit our Website</a>
           </div>
-          <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${currentYear} ELFC All rights reserved.</p>
+          <p style="margin: 0; font-size: 11px; color: #64748b;">&copy; ${currentYear} Encore Leasing & Finance Corp. All rights reserved.</p>
           <p style="margin: 8px 0 0 0; font-size: 10px; color: #94a3b8;">
             (044) 940-5625 | 0919-067-7719 | 0919-077-2664<br/>
-            ELFC Building, Maharlika Highway, Cabanatuan City
+            Encore Building, Maharlika Highway, Cabanatuan City
           </p>
         </div>
       </div>
@@ -1780,7 +1780,7 @@ ELFC Portal Admin`;
           <div className="bg-brand-600 p-8 flex flex-col items-center justify-center">
             <img 
               src="/assets/img/logo.png" 
-              alt="ELFC Logo" 
+              alt="Encore Logo" 
               className="h-14 w-auto object-contain brightness-0 invert"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -1894,7 +1894,7 @@ ELFC Portal Admin`;
 
             
             <p className="text-[10px] text-gray-400 text-center">
-              Restricted access. Authorized ELFC employees only.
+              Restricted access. Authorized Encore employees only.
             </p>
           </div>
         </motion.div>
@@ -1996,7 +1996,7 @@ ELFC Portal Admin`;
               {userProfile.status === 'pending' ? 'Approval Pending' : 'Access Suspended'}
             </h1>
             <p className="text-brand-100 text-xs mt-1.5 uppercase font-semibold tracking-wider">
-              ELFC
+              Encore Leasing & Finance Corp.
             </p>
           </div>
           
@@ -2011,7 +2011,7 @@ ELFC Portal Admin`;
                   </div>
                 )}
                 <div>
-                  <p className="font-semibold text-xs text-gray-800">{userProfile.displayName || 'ELFC Employee'}</p>
+                  <p className="font-semibold text-xs text-gray-800">{userProfile.displayName || 'Encore Employee'}</p>
                   <p className="text-[10px] text-gray-500">{userProfile.email}</p>
                 </div>
               </div>
@@ -2023,7 +2023,7 @@ ELFC Portal Admin`;
                   </p>
                 ) : (
                   <p>
-                    Your account access to the ELFC Email Blast system has been <strong>suspended or disabled</strong>. Please contact your manager or the administrator.
+                    Your account access to the Encore Email Blast system has been <strong>suspended or disabled</strong>. Please contact your manager or the administrator.
                   </p>
                 )}
                 <p className="text-[11px] text-gray-400 italic">
@@ -2056,7 +2056,7 @@ ELFC Portal Admin`;
           <div className="flex items-center gap-3">
             <img 
               src="/assets/img/logo.png" 
-              alt="ELFC Logo" 
+              alt="Encore Logo" 
               className="h-10 w-auto object-contain"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -2072,7 +2072,7 @@ ELFC Portal Admin`;
               <div className="w-8 h-8 bg-brand-600 rounded-lg flex items-center justify-center">
                 <Mail className="text-white w-5 h-5" />
               </div>
-              <h1 className="text-xl font-bold tracking-tight">ELFC</h1>
+              <h1 className="text-xl font-bold tracking-tight">Encore</h1>
             </div>
           </div>
             <div className="flex items-center gap-6">
@@ -2955,7 +2955,7 @@ ELFC Portal Admin`;
                       <div className="space-y-2">
                         <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Preview</p>
                         <div className="p-4 bg-gray-50 rounded-lg border border-gray-100 text-sm">
-                          <p className="font-bold mb-1">From: <span className="font-normal text-gray-500">ELFC &lt;no-reply@encorefinancials.com&gt;</span></p>
+                          <p className="font-bold mb-1">From: <span className="font-normal text-gray-500">Encore Leasing and Finance Corp. &lt;no-reply@encorefinancials.com&gt;</span></p>
                           <p className="font-bold mb-1">To: <span className="font-normal text-gray-500">Selected Contacts</span></p>
                           <p className="font-bold">Subject: <span className="font-normal text-gray-500">{subject || '(No subject)'}</span></p>
                         </div>
@@ -3306,7 +3306,7 @@ ELFC Portal Admin`;
                         Admin Control Panel
                       </h2>
                       <p className="text-gray-500 text-xs mt-1">
-                        Configure who possesses authorization to log in and use the ELFC Portal.
+                        Configure who possesses authorization to log in and use the Encore Portal.
                       </p>
                     </div>
                     <div className="bg-brand-50 border border-brand-100 rounded-lg px-4 py-2.5 text-right">
@@ -4182,7 +4182,7 @@ ELFC Portal Admin`;
         <div className="flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="flex items-center gap-2 opacity-50">
             <Mail className="w-4 h-4" />
-            <span className="text-sm font-medium">ELFC v1.0.0</span>
+            <span className="text-sm font-medium">Encore v1.0.0</span>
           </div>
           <div className="flex gap-8 text-sm text-gray-500">
             <a href="#" className="hover:text-gray-900 transition-colors">Documentation</a>
