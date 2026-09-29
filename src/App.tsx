@@ -172,7 +172,15 @@ Warm regards,
     id: 'releases',
     name: 'Booked Accounts / Releases',
     subject: 'Thank You - Encore Leasing & Finance Corp.',
-    body: `Maraming Salamat #firstname! Masaya po kami na kayo ay aming napagsilbihan. Encore Leasing & Finance Corp.`
+    body: `Dear <b>#firstname</b>,
+
+<b>Maraming salamat po sa inyong tiwala!</b> Masaya po kami na kayo ay aming napagsilbihan.
+
+Patuloy po kaming magbibigay ng aming pinakamahusay na serbisyo para sa inyo.
+
+<b>Maraming salamat po!</b> 💙
+
+<b>Encore Leasing & Finance Corp.</b>`
   },
   {
     id: 'birthday',
