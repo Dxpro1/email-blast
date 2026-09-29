@@ -1369,6 +1369,7 @@ Encore Portal Admin`;
   const generateEmailHtml = (subjectText: string, bodyText: string) => {
     const isBirthday = templateStyle === 'birthday' || subjectText.toLowerCase().includes('birthday') || bodyText.toLowerCase().includes('birthday');
     const isMarketing = templateStyle === 'marketing';
+    const isFlyer = templateStyle === 'flyer';
     const isAnnouncement = templateStyle === 'announcement';
     const currentYear = new Date().getFullYear();
 
@@ -1455,6 +1456,30 @@ Encore Portal Admin`;
           <!-- Simple Footer -->
           <div style="padding: 20px; text-align: center;">
             <p style="margin: 0; font-size: 12px; color: #718096; line-height: 1.6;">
+              Encore Leasing & Finance Corp.<br/>
+              Maharlika Highway, Cabanatuan City<br/>
+              <br/>
+              <a href="#" style="color: #4a5568; text-decoration: underline;">Unsubscribe</a> | <a href="https://encorefinancials.com/" style="color: #4a5568; text-decoration: underline;">Website</a>
+            </p>
+          </div>
+        </div>
+      `;
+    }
+
+    if (isFlyer) {
+      // Parse URLs from body text. Strip out HTML tags first.
+      const rawUrls = bodyText.replace(/<[^>]+>/g, '\n').split(/\n/).map(u => u.trim()).filter(u => u.startsWith('http'));
+      
+      const imagesHtml = rawUrls.length > 0 
+        ? rawUrls.map(url => `<img src="${url}" alt="Promotion Flyer" style="width: 100%; height: auto; max-width: 600px; display: block; margin: 0; padding: 0; outline: none; border: none;" referrerPolicy="no-referrer" />`).join('')
+        : `<div style="padding: 40px; text-align: center; color: #666; font-size: 16px; font-family: sans-serif;">Please paste valid Image URLs into the email body (one URL per line) to generate the Flyer.</div>`;
+        
+      return `
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 0; line-height: 0; font-size: 0;">
+          ${imagesHtml}
+          <!-- Unsubscribe Footer for compliance -->
+          <div style="padding: 20px; text-align: center; background-color: #f4f7f6; line-height: normal; font-size: 12px; margin-top: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+            <p style="margin: 0; color: #718096; line-height: 1.6;">
               Encore Leasing & Finance Corp.<br/>
               Maharlika Highway, Cabanatuan City<br/>
               <br/>
@@ -2808,10 +2833,11 @@ Encore Portal Admin`;
                               <SelectValue placeholder="Design Theme" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="standard">Standard Notice</SelectItem>
-                              <SelectItem value="marketing">Marketing Promotion</SelectItem>
-                              <SelectItem value="announcement">Official Announcement</SelectItem>
-                              <SelectItem value="birthday">Birthday Greeting</SelectItem>
+                              {!isMarketing && <SelectItem value="standard">Standard Notice</SelectItem>}
+                              <SelectItem value="marketing">Marketing Theme (With Text)</SelectItem>
+                              <SelectItem value="flyer">Flyer Theme (100% Images)</SelectItem>
+                              {!isMarketing && <SelectItem value="announcement">Official Announcement</SelectItem>}
+                              {!isMarketing && <SelectItem value="birthday">Birthday Greeting</SelectItem>}
                             </SelectContent>
                           </Select>
                           <Select onValueChange={handleTemplateSelect}>
