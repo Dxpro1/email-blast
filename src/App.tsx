@@ -140,14 +140,23 @@ const TEMPLATES = [
     id: 'insurance',
     name: 'INSURANCE',
     subject: 'Insurance Expiry Notice - Encore Leasing & Finance Corp.',
-    body: `Hi Ma'am/Sir #firstname we would like to inform you that the insurance of your vehicle(s) mortgaged to us is due to expire. To ensure your continued, protection Encore Leasing & Finance Corp. shall renew the insurance policy of your vehicle if you failed to provide your own insurance policy 5 working days before expiry with details given below: 
+    body: `Dear <b>#firstname</b>,
 
-Year Model: #yearmodel
-Unit : #unit 
-Plate No. : #plate 
-Expiry Date : #expiry
+Just a friendly reminder from <b>Encore Leasing & Finance Corp. (ELFC)</b> that the insurance policy of your vehicle mortgaged to us is <b>due to expire soon</b>.
 
-Should you have any clarification or require further assistance, you may call or text (044) 940-5625 or 0919-067-7719`
+If you wish to renew the insurance on your own, kindly provide us with a copy of your renewed policy <b>at least five (5) working days before the expiry date</b>.
+
+If we do not receive your renewed policy within this period, <b>ELFC will arrange the renewal of the insurance policy on your behalf</b>.
+
+<b>Vehicle Details:</b>
+<b>Year Model:</b> #yearmodel
+<b>Unit:</b> #unit
+<b>Plate No.:</b> #plate
+<b>Expiry Date:</b> #expiry
+
+For questions or assistance, please call or text <b>(044) 940-5625</b> or <b>0919-067-7719</b>.
+
+Thank you, <b>#firstname</b>, for your continued trust in <b>Encore Leasing & Finance Corp.</b> 💙`
   },
   {
     id: 'pdc',
