@@ -190,7 +190,13 @@ Patuloy po kaming magbibigay ng aming pinakamahusay na serbisyo para sa inyo.
     id: 'birthday',
     name: 'Birthday',
     subject: 'Happy Birthday!',
-    body: `Happy Birthday #firstname! We wanted to take a moment to send you our warmest wishes. We hope your special day is filled with joy, laughter, and everything you love. Warmest regards from your Encore Leasing & Finance Corp. Family!`
+    body: `Dear <b>#firstname</b>,
+
+<b>Happy Birthday! 🎉🎂</b>
+
+Wishing you a wonderful day filled with <b>joy, laughter, and all the things that make you happy</b>. May the year ahead bring you many more blessings and memorable moments.
+
+Warmest wishes from your <b>Encore Leasing & Finance Corp. Family!</b> 💙`
   },
   {
     id: 'due_date',
