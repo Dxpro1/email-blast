@@ -163,10 +163,7 @@ To avoid any inconvenience, we kindly ask that you settle your insurance premium
 
 For any questions or assistance, feel free to call or text us at <b>(044) 940-5625</b> or <b>0919-067-7719</b>.
 
-Thank you, <b>#firstname</b>! We truly appreciate your continued trust in <b>Encore Leasing and Finance Corp.</b> 💙
-
-Warm regards,
-<b>Encore Leasing and Finance Corp.</b>`
+Thank you, <b>#firstname</b>! We truly appreciate your continued trust in <b>Encore Leasing and Finance Corp.</b> 💙`
   },
   {
     id: 'releases',
@@ -178,9 +175,7 @@ Warm regards,
 
 Patuloy po kaming magbibigay ng aming pinakamahusay na serbisyo para sa inyo.
 
-<b>Maraming salamat po!</b> 💙
-
-<b>Encore Leasing & Finance Corp.</b>`
+<b>Maraming salamat po!</b> 💙`
   },
   {
     id: 'birthday',
