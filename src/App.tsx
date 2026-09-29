@@ -294,7 +294,7 @@ export default function App() {
   const [isEditUserOpen, setIsEditUserOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState('');
   const [editUserName, setEditUserName] = useState('');
-  const [editUserRole, setEditUserRole] = useState<'super_admin' | 'user'>('user');
+  const [editUserRole, setEditUserRole] = useState<'super_admin' | 'marketing' | 'user'>('user');
   const [isUpdatingUser, setIsUpdatingUser] = useState(false);
 
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
@@ -3549,10 +3549,11 @@ Encore Portal Admin`;
                               <select 
                                 id="createUserRole"
                                 value={createUserRole}
-                                onChange={(e) => setCreateUserRole(e.target.value as 'super_admin' | 'user')}
+                                onChange={(e) => setCreateUserRole(e.target.value as 'super_admin' | 'marketing' | 'user')}
                                 className="w-full h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                               >
                                 <option value="user">User</option>
+                                <option value="marketing">Marketing</option>
                                 <option value="super_admin">Super Admin</option>
                               </select>
                             </div>
@@ -3614,10 +3615,11 @@ Encore Portal Admin`;
                               <select 
                                 id="editUserRole"
                                 value={editUserRole}
-                                onChange={(e) => setEditUserRole(e.target.value as 'super_admin' | 'user')}
+                                onChange={(e) => setEditUserRole(e.target.value as 'super_admin' | 'marketing' | 'user')}
                                 className="w-full h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
                               >
                                 <option value="user">User</option>
+                                <option value="marketing">Marketing</option>
                                 <option value="super_admin">Super Admin</option>
                               </select>
                             </div>
