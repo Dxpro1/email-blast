@@ -1796,7 +1796,7 @@ Encore Portal Admin`;
               <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center mb-2">
                 <Mail className="text-white w-6 h-6" />
               </div>
-              <h1 className="text-2xl font-black tracking-[4px] text-white m-0">ENCORE</h1>
+              <h1 className="text-2xl font-black tracking-[4px] text-white m-0">ELFC</h1>
             </div>
             <p className="text-brand-100 text-[10px] font-bold tracking-widest uppercase mt-3">Leasing & Finance Corp.</p>
           </div>
@@ -1894,7 +1894,7 @@ Encore Portal Admin`;
 
             
             <p className="text-[10px] text-gray-400 text-center">
-              Restricted access. Authorized Encore employees only.
+              Restricted access. Authorized ELFC employees only.
             </p>
           </div>
         </motion.div>
