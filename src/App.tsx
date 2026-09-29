@@ -187,7 +187,19 @@ Patuloy po kaming magbibigay ng aming pinakamahusay na serbisyo para sa inyo.
     id: 'due_date',
     name: 'Due Date',
     subject: 'Payment Reminder - Encore Leasing & Finance Corp.',
-    body: `Good Day Ms./Mr. #firstname, Just a gentle reminder that your monthly amortization amounting to #periodicins is due on #ddate. Kindly settle your amortization on time to avoid penalties. For inquiries, call us at  0919-077-2664. If payment has been made, please disregard this message`
+    body: `Dear <b>#firstname</b>,
+
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your <b>monthly loan amortization of #periodicins</b>, which is due on <b>#ddate</b>.
+
+If you have an issued check, kindly make sure that sufficient funds are available for deposit on the said date.
+
+If you have not issued a check, you may conveniently settle your loan amortization through <b>any of our available payment channels</b>, including but not limited to <b>GCash, 7-Eleven, Maya, Cebuana Lhuillier, ECPay, and BDO</b>.
+
+To avoid any inconvenience, we kindly ask that you settle your loan amortization on or before the due date.
+
+For any questions or assistance, feel free to call or text us at <b>(044) 940-5625</b> or <b>0919-067-7719</b>.
+
+Thank you, <b>#firstname</b>, and we truly appreciate your continued trust in <b>Encore Leasing and Finance Corp.</b> 😊`
   }
 ];
 
