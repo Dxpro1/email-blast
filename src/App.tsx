@@ -883,6 +883,9 @@ export default function App() {
     try {
       const secAuth = getSecondaryAuth();
       const userCredential = await createUserWithEmailAndPassword(secAuth, createUserEmail, createUserPassword);
+      
+      // Automatically send the Firebase verification email so they don't have to click "Resend" later
+      await sendEmailVerification(userCredential.user);
 
       const newUserId = userCredential.user.uid;
       try {
