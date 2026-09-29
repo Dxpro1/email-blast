@@ -285,6 +285,12 @@ export default function App() {
   // User Creation State
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createUserName, setCreateUserName] = useState('');
+  
+  useEffect(() => {
+    if (isMarketing && templateStyle === 'standard') {
+      setTemplateStyle('marketing');
+    }
+  }, [isMarketing, templateStyle]);
   const [createUserEmail, setCreateUserEmail] = useState('');
   const [createUserPassword, setCreateUserPassword] = useState('');
   const [createUserRole, setCreateUserRole] = useState<'super_admin' | 'marketing' | 'user'>('user');
