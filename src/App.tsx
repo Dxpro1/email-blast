@@ -310,6 +310,10 @@ export default function App() {
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduledDate, setScheduledDate] = useState('');
   const [isScheduling, setIsScheduling] = useState(false);
+  
+  const [isTestEmailOpen, setIsTestEmailOpen] = useState(false);
+  const [testEmailAddress, setTestEmailAddress] = useState(user?.email || '');
+  const [isSendingTest, setIsSendingTest] = useState(false);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [importedFileName, setImportedFileName] = useState('');
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -1699,6 +1703,47 @@ Encore Portal Admin`;
 
   const missingPlaceholders = getMissingPlaceholders();
 
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress || !testEmailAddress.includes('@')) {
+      toast.error('Please enter a valid email address');
+      return;
+    }
+    if (!subject || !body) {
+      toast.error('Subject and body are required');
+      return;
+    }
+
+    setIsSendingTest(true);
+    try {
+      const dummyContact = contacts.length > 0 ? contacts[0] : { email: testEmailAddress } as Contact;
+      const personalizedBody = replacePlaceholders(body, dummyContact, true);
+      const personalizedSubject = replacePlaceholders(subject, dummyContact, false);
+      const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
+
+      const response = await fetch('/api/send-blast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{
+            to: [testEmailAddress],
+            from: "Encore Financials <encorefinancials@gmail.com>",
+            subject: "[TEST] " + personalizedSubject,
+            html: htmlBody,
+          }]
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to send test email');
+      
+      toast.success('Test email sent successfully!');
+      setIsTestEmailOpen(false);
+    } catch (err: any) {
+      toast.error('Test email failed: ' + err.message);
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
   const sendBlast = async () => {
     if (contacts.length === 0) {
       toast.error('No recipients. Please import a CSV file or add contacts manually.');
@@ -2383,6 +2428,45 @@ Encore Portal Admin`;
                 {isSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
                 Send Now
               </Button>
+              <Dialog open={isTestEmailOpen} onOpenChange={setIsTestEmailOpen}>
+                <DialogTrigger render={
+                  <Button 
+                    variant="outline"
+                    disabled={isSending || isScheduling || !subject || !body}
+                    className="border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm"
+                  >
+                    Test Email
+                  </Button>
+                } />
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Send Test Email</DialogTitle>
+                    <DialogDescription>
+                      Send a preview of this campaign to yourself or a team member before blasting to all contacts.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="py-4">
+                    <Label htmlFor="test-email" className="mb-2 block text-sm font-medium">Test Recipient Email</Label>
+                    <Input 
+                      type="email" 
+                      id="test-email"
+                      value={testEmailAddress}
+                      onChange={(e) => setTestEmailAddress(e.target.value)}
+                      placeholder="e.g. you@encorefinancials.com"
+                    />
+                  </div>
+                  <DialogFooter>
+                    <Button variant="ghost" onClick={() => setIsTestEmailOpen(false)}>Cancel</Button>
+                    <Button 
+                      className="bg-brand-600 hover:bg-brand-700 text-white"
+                      disabled={!testEmailAddress || isSendingTest}
+                      onClick={handleSendTestEmail}
+                    >
+                      {isSendingTest ? 'Sending...' : 'Send Test'}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
               <Dialog open={isScheduleOpen} onOpenChange={setIsScheduleOpen}>
                 <DialogTrigger render={
                   <Button 
