@@ -1453,10 +1453,6 @@ Encore Portal Admin`;
               </p>
             </div>
 
-            <div style="margin-top: 40px; padding-top: 25px; border-top: 1px solid #f1f5f9; text-align: left;">
-              <p style="margin: 0; font-size: 14px; color: #4b5563; font-weight: 600;">Warmest regards,</p>
-              <p style="margin: 5px 0 0 0; font-size: 15px; color: #102CA4; font-weight: 700;">Encore Leasing & Finance Corp. Family</p>
-            </div>
           </div>
           
           <!-- Footer -->
