@@ -350,6 +350,72 @@ export default function App() {
   const emailEditorRef = useRef<EditorRef>(null);
   const [isVisualEditorOpen, setIsVisualEditorOpen] = useState(false);
   const [visualDesign, setVisualDesign] = useState<any>(null);
+  const [savedDesigns, setSavedDesigns] = useState<{ id: string; name: string; design: any; createdAt: string }[]>([]);
+  const [isSavingDesign, setIsSavingDesign] = useState(false);
+  const [saveDesignName, setSaveDesignName] = useState('');
+  const [showSaveDesignPanel, setShowSaveDesignPanel] = useState(false);
+  const [showLoadDesignPanel, setShowLoadDesignPanel] = useState(false);
+  const [isLoadingDesigns, setIsLoadingDesigns] = useState(false);
+
+  // Load saved designs from Firestore when builder opens
+  const loadSavedDesigns = async () => {
+    if (!user) return;
+    setIsLoadingDesigns(true);
+    try {
+      const q = query(collection(db, 'users', user.uid, 'emailDesigns'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      setSavedDesigns(snap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
+    } catch (e) {
+      console.error('Failed to load designs:', e);
+    } finally {
+      setIsLoadingDesigns(false);
+    }
+  };
+
+  const handleSaveDesign = async () => {
+    if (!user || !saveDesignName.trim()) {
+      toast.error('Please enter a design name.');
+      return;
+    }
+    if (!emailEditorRef.current) return;
+    setIsSavingDesign(true);
+    emailEditorRef.current.editor.exportHtml(async (data: any) => {
+      try {
+        await addDoc(collection(db, 'users', user.uid, 'emailDesigns'), {
+          name: saveDesignName.trim(),
+          design: data.design,
+          createdAt: new Date().toISOString(),
+        });
+        toast.success(`Design "${saveDesignName.trim()}" saved!`);
+        setSaveDesignName('');
+        setShowSaveDesignPanel(false);
+        await loadSavedDesigns();
+      } catch (e: any) {
+        toast.error('Failed to save design: ' + e.message);
+      } finally {
+        setIsSavingDesign(false);
+      }
+    });
+  };
+
+  const handleLoadDesign = (design: any) => {
+    if (emailEditorRef.current) {
+      emailEditorRef.current.editor.loadDesign(design);
+      setShowLoadDesignPanel(false);
+      toast.success('Design loaded!');
+    }
+  };
+
+  const handleDeleteDesign = async (designId: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'users', user.uid, 'emailDesigns', designId));
+      setSavedDesigns(prev => prev.filter(d => d.id !== designId));
+      toast.success('Design deleted.');
+    } catch (e: any) {
+      toast.error('Failed to delete: ' + e.message);
+    }
+  };
 
   const dashboardStats = useMemo(() => {
     let totalSent = 0;
@@ -4343,16 +4409,98 @@ Encore Portal Admin`;
             style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#f1f5f9' }}
           >
             {/* Toolbar */}
-            <div style={{ background: '#102CA4', color: '#fff', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <LayoutDashboard style={{ width: 18, height: 18, opacity: 0.8 }} />
-                <span style={{ fontWeight: 700, fontSize: 15 }}>Visual Email Builder</span>
-                <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.15)', padding: '2px 10px', borderRadius: 20, marginLeft: 6, letterSpacing: 1 }}>BETA</span>
+            <div style={{ background: '#102CA4', color: '#fff', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', flexShrink: 0, gap: 12 }}>
+              {/* Left: Title */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                <LayoutDashboard style={{ width: 17, height: 17, opacity: 0.8 }} />
+                <span style={{ fontWeight: 700, fontSize: 14 }}>Visual Email Builder</span>
+                <span style={{ fontSize: 10, background: 'rgba(255,255,255,0.15)', padding: '2px 8px', borderRadius: 20, letterSpacing: 1 }}>BETA</span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+
+              {/* Center: Subject Line */}
+              <div style={{ flex: 1, maxWidth: 420, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 12, opacity: 0.7, flexShrink: 0 }}>Subject:</span>
+                <input
+                  type="text"
+                  placeholder="Enter email subject line..."
+                  value={subject}
+                  onChange={e => setSubject(e.target.value)}
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 10px', color: '#fff', fontSize: 13, outline: 'none' }}
+                />
+              </div>
+
+              {/* Right: Actions */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative' }}>
+                {/* Load Design */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => { setShowLoadDesignPanel(p => !p); setShowSaveDesignPanel(false); if (!showLoadDesignPanel) loadSavedDesigns(); }}
+                    style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12 }}
+                  >
+                    📂 Load Design
+                  </button>
+                  {showLoadDesignPanel && (
+                    <div style={{ position: 'absolute', top: 36, right: 0, width: 280, background: '#fff', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)', zIndex: 10, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                      <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', fontSize: 12, fontWeight: 700, color: '#334155' }}>📁 Saved Designs</div>
+                      <div style={{ maxHeight: 250, overflowY: 'auto' }}>
+                        {isLoadingDesigns ? (
+                          <div style={{ padding: 20, textAlign: 'center', color: '#64748b', fontSize: 12 }}>Loading...</div>
+                        ) : savedDesigns.length === 0 ? (
+                          <div style={{ padding: 20, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>No saved designs yet.</div>
+                        ) : savedDesigns.map(d => (
+                          <div key={d.id} style={{ padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f8fafc', cursor: 'pointer' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{d.name}</div>
+                              <div style={{ fontSize: 10, color: '#94a3b8' }}>{new Date(d.createdAt).toLocaleDateString()}</div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button onClick={() => handleLoadDesign(d.design)} style={{ background: '#102CA4', color: '#fff', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11, cursor: 'pointer' }}>Load</button>
+                              <button onClick={() => handleDeleteDesign(d.id)} style={{ background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11, cursor: 'pointer' }}>✕</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Save Design */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => { setShowSaveDesignPanel(p => !p); setShowLoadDesignPanel(false); }}
+                    style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12 }}
+                  >
+                    💾 Save Design
+                  </button>
+                  {showSaveDesignPanel && (
+                    <div style={{ position: 'absolute', top: 36, right: 0, width: 260, background: '#fff', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)', zIndex: 10, padding: 14, border: '1px solid #e2e8f0' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#334155', marginBottom: 8 }}>💾 Name this Design</div>
+                      <input
+                        type="text"
+                        placeholder="e.g. October Promo"
+                        value={saveDesignName}
+                        onChange={e => setSaveDesignName(e.target.value)}
+                        onKeyDown={e => e.key === 'Enter' && handleSaveDesign()}
+                        style={{ width: '100%', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: 13, outline: 'none', marginBottom: 8, boxSizing: 'border-box' }}
+                        autoFocus
+                      />
+                      <button
+                        onClick={handleSaveDesign}
+                        disabled={isSavingDesign}
+                        style={{ width: '100%', background: '#102CA4', color: '#fff', border: 'none', borderRadius: 6, padding: '7px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+                      >
+                        {isSavingDesign ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 <button
                   onClick={() => setIsVisualEditorOpen(false)}
-                  style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
+                  style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12 }}
                 >
                   Cancel
                 </button>
@@ -4364,13 +4512,15 @@ Encore Portal Admin`;
                         setVisualDesign(design);
                         setBody(html);
                         setIsVisualEditorOpen(false);
-                        toast.success('Design saved! Ready to send.');
+                        setShowSaveDesignPanel(false);
+                        setShowLoadDesignPanel(false);
+                        toast.success('Design applied! Ready to send.');
                       });
                     }
                   }}
-                  style={{ background: '#FFDF00', color: '#102CA4', border: 'none', borderRadius: 6, padding: '6px 20px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+                  style={{ background: '#FFDF00', color: '#102CA4', border: 'none', borderRadius: 6, padding: '5px 18px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
                 >
-                  ✓ Save & Apply Design
+                  ✓ Apply & Send
                 </button>
               </div>
             </div>
@@ -4386,6 +4536,7 @@ Encore Portal Admin`;
                 }}
                 options={{
                   appearance: { theme: 'light' },
+                  features: { preview: true },
                   projectId: undefined,
                 }}
                 style={{ height: 'calc(100vh - 52px)', width: '100%', display: 'block' }}
