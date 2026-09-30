@@ -1603,10 +1603,19 @@ Encore Portal Admin`;
 
   const extractPlaceholders = (text: string) => {
     const matches = text.match(/#([a-zA-Z0-9_]+)/g);
-    return matches ? Array.from(new Set(matches.map(m => m.slice(1)))) : [];
+    if (!matches) return [];
+    return Array.from(new Set(
+      matches
+        .map(m => m.slice(1))
+        // Filter out hex color codes (3 or 6 hex digits only)
+        .filter(p => !/^[0-9A-Fa-f]{3}$/.test(p) && !/^[0-9A-Fa-f]{6}$/.test(p))
+    ));
   };
 
   const getMissingPlaceholders = () => {
+    // Visual Builder and Flyer HTML contain many #xxxxxx color codes — skip placeholder detection entirely
+    if (templateStyle === 'visual' || templateStyle === 'flyer') return [];
+
     const requiredPlaceholders = Array.from(new Set([
       ...extractPlaceholders(subject),
       ...extractPlaceholders(body)
