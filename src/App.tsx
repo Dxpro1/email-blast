@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { 
-  Mail, 
-  Users, 
-  Send, 
-  History, 
-  Sparkles, 
-  Plus, 
-  Trash2, 
-  CheckCircle2, 
+import {
+  Mail,
+  Users,
+  Send,
+  History,
+  Sparkles,
+  Plus,
+  Trash2,
+  CheckCircle2,
   AlertCircle,
   Loader2,
   ChevronRight,
@@ -69,6 +69,7 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { DEFAULT_ENCORE_DESIGN } from './lib/defaultDesign';
+import { TEMPLATES } from './lib/templates';
 
 // Initialize Gemini is handled server-side to protect keys and prevent browser environment crashes
 
@@ -256,11 +257,11 @@ export default function App() {
   const [isRefreshingAnalytics, setIsRefreshingAnalytics] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const isPausedRef = useRef(isPaused);
-  
+
   useEffect(() => {
     isPausedRef.current = isPaused;
   }, [isPaused]);
-  
+
   const [blastProgress, setBlastProgress] = useState({ current: 0, total: 0, success: 0, failed: 0 });
   const [blastQueue, setBlastQueue] = useState<{
     totalBatches: number;
@@ -289,7 +290,7 @@ export default function App() {
   // User Creation State
   const [isCreateUserOpen, setIsCreateUserOpen] = useState(false);
   const [createUserName, setCreateUserName] = useState('');
-  
+
   useEffect(() => {
     if (isMarketing && templateStyle === 'standard') {
       setTemplateStyle('marketing');
@@ -310,7 +311,7 @@ export default function App() {
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [scheduledDate, setScheduledDate] = useState('');
   const [isScheduling, setIsScheduling] = useState(false);
-  
+
   const [isTestEmailOpen, setIsTestEmailOpen] = useState(false);
   const [testEmailAddress, setTestEmailAddress] = useState(user?.email || '');
   const [isSendingTest, setIsSendingTest] = useState(false);
@@ -333,10 +334,10 @@ export default function App() {
       toast.error('Image size must be less than 5MB.');
       return;
     }
-    
+
     setIsUploadingImage(true);
     const toastId = toast.loading('Uploading image...');
-    
+
     try {
       const storageRef = ref(storage, `flyers/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`);
       await uploadBytes(storageRef, file);
@@ -360,6 +361,7 @@ export default function App() {
   const [saveDesignName, setSaveDesignName] = useState('');
   const [showSaveDesignPanel, setShowSaveDesignPanel] = useState(false);
   const [showLoadDesignPanel, setShowLoadDesignPanel] = useState(false);
+  const [showTemplatesPanel, setShowTemplatesPanel] = useState(false);
   const [isLoadingDesigns, setIsLoadingDesigns] = useState(false);
 
   // Load saved designs from Firestore when builder opens
@@ -433,7 +435,7 @@ export default function App() {
     });
     const totalAttempted = totalSent + totalFailed;
     const successRate = totalAttempted > 0 ? Math.round((totalSent / totalAttempted) * 100) : 100;
-    
+
     return {
       totalSent,
       totalFailed,
@@ -500,12 +502,12 @@ export default function App() {
   const handleRetryFailedEmails = (historyItem?: BlastHistory) => {
     const targetHistory = historyItem || selectedHistory;
     if (!targetHistory) return;
-    
+
     const failedRawContacts = targetHistory.rawContacts?.filter(c => c.status === 'failed') || [];
     const legacyFailedContacts = targetHistory.failedContacts || [];
-    
+
     const contactsToRetry = failedRawContacts.length > 0 ? failedRawContacts : legacyFailedContacts;
-    
+
     if (contactsToRetry.length === 0) {
       toast.error("No failed contacts found to retry.");
       return;
@@ -569,7 +571,7 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      
+
       if (!u) {
         setUserProfile(null);
         setCheckingProfile(false);
@@ -595,7 +597,7 @@ export default function App() {
         if (cached) {
           try {
             setUserProfile(JSON.parse(cached));
-          } catch (_) {}
+          } catch (_) { }
         } else {
           setUserProfile({
             uid: u.uid,
@@ -626,7 +628,7 @@ export default function App() {
           };
           setUserProfile(profile);
           localStorage.setItem(`encore_profile_${u.uid}`, JSON.stringify(profile));
-          
+
           // Auto-update super_admin role for bootstrapped admin if not set
           if (isBootstrappedAdmin && (data.role !== 'super_admin' || data.status !== 'active')) {
             setDoc(userDocRef, { role: 'super_admin', status: 'active' }, { merge: true }).catch(console.warn);
@@ -660,18 +662,18 @@ export default function App() {
               createdAt: whitelistedDoc?.createdAt || serverTimestamp(),
               updatedAt: serverTimestamp()
             }, { merge: true })
-            .then(() => {
-              if (tempDocId) {
-                deleteDoc(doc(db, 'users', tempDocId)).catch(console.warn);
-              }
-            })
-            .catch((err) => {
-              console.warn("Could not write user profile automatically:", err);
-              // Set local profile so user can proceed
-              setUserProfile(initialProfile);
-              setCheckingProfile(false);
-              setAuthLoading(false);
-            });
+              .then(() => {
+                if (tempDocId) {
+                  deleteDoc(doc(db, 'users', tempDocId)).catch(console.warn);
+                }
+              })
+              .catch((err) => {
+                console.warn("Could not write user profile automatically:", err);
+                // Set local profile so user can proceed
+                setUserProfile(initialProfile);
+                setCheckingProfile(false);
+                setAuthLoading(false);
+              });
           }).catch((err) => {
             console.warn("Querying email whitelist failed (likely rules):", err);
             // Fallback: create fresh document
@@ -706,7 +708,7 @@ export default function App() {
         if (cached) {
           try {
             setUserProfile(JSON.parse(cached));
-          } catch (_) {}
+          } catch (_) { }
         } else {
           setUserProfile({
             uid: u.uid,
@@ -750,11 +752,11 @@ export default function App() {
       // Offline fallback: read from local storage
       const cachedContacts = localStorage.getItem(localContactsKey);
       if (cachedContacts) {
-        try { setContacts(JSON.parse(cachedContacts)); } catch (_) {}
+        try { setContacts(JSON.parse(cachedContacts)); } catch (_) { }
       }
       const cachedHistory = localStorage.getItem(localHistoryKey);
       if (cachedHistory) {
-        try { setHistory(JSON.parse(cachedHistory)); } catch (_) {}
+        try { setHistory(JSON.parse(cachedHistory)); } catch (_) { }
       }
       return;
     }
@@ -770,7 +772,7 @@ export default function App() {
       console.warn("Contacts subscription failed, using local storage fallback", err);
       const cachedContacts = localStorage.getItem(localContactsKey);
       if (cachedContacts) {
-        try { setContacts(JSON.parse(cachedContacts)); } catch (_) {}
+        try { setContacts(JSON.parse(cachedContacts)); } catch (_) { }
       }
     });
 
@@ -784,7 +786,7 @@ export default function App() {
       console.warn("History subscription failed, using local storage fallback", err);
       const cachedHistory = localStorage.getItem(localHistoryKey);
       if (cachedHistory) {
-        try { setHistory(JSON.parse(cachedHistory)); } catch (_) {}
+        try { setHistory(JSON.parse(cachedHistory)); } catch (_) { }
       }
     });
 
@@ -804,11 +806,11 @@ export default function App() {
     setLoadingAllUsers(true);
     const usersCollectionRef = collection(db, 'users');
     const qUsers = query(usersCollectionRef, orderBy('createdAt', 'desc'));
-    
+
     const unsubscribe = onSnapshot(qUsers, (snapshot) => {
       const list = snapshot.docs.map(doc => {
         const data = doc.data();
-        return { 
+        return {
           uid: doc.id,
           email: data.email || null,
           displayName: data.displayName || null,
@@ -876,7 +878,7 @@ export default function App() {
     const roles: ('super_admin' | 'marketing' | 'user')[] = ['user', 'marketing', 'super_admin'];
     const currentIndex = roles.indexOf(targetUser.role || 'user');
     const nextRole = roles[(currentIndex + 1) % roles.length];
-    
+
     try {
       await setDoc(doc(db, 'users', targetUser.uid), {
         role: nextRole,
@@ -896,7 +898,7 @@ export default function App() {
       return;
     }
     const emailLower = newTeamEmail.trim().toLowerCase();
-    
+
     // Check if user is already present in our loaded collection
     if (allUsers.some(u => u.email?.toLowerCase() === emailLower)) {
       toast.error("This email address is already registered or whitelisted.");
@@ -969,7 +971,7 @@ export default function App() {
       toast.error('Name is required.');
       return;
     }
-    
+
     setIsUpdatingUser(true);
     try {
       await setDoc(doc(db, 'users', editingUserId), {
@@ -1001,7 +1003,7 @@ export default function App() {
     try {
       const secAuth = getSecondaryAuth();
       const userCredential = await createUserWithEmailAndPassword(secAuth, createUserEmail, createUserPassword);
-      
+
       // Automatically send the Firebase verification email so they don't have to click "Resend" later
       await sendEmailVerification(userCredential.user);
 
@@ -1072,7 +1074,7 @@ Encore Portal Admin`;
       setIsCreatingUser(false);
       try {
         await signOut(getSecondaryAuth());
-      } catch (e) {}
+      } catch (e) { }
     }
   };
 
@@ -1088,47 +1090,47 @@ Encore Portal Admin`;
         const fields = results.meta.fields || [];
         setCsvHeaders(fields);
         setCsvData(results.data);
-        
+
         const initialMapping: Record<string, string> = {
-          email: '', name: '', firstname: '', yearmodel: '', 
-          unit: '', plate: '', expiry: '', amount: '', 
+          email: '', name: '', firstname: '', yearmodel: '',
+          unit: '', plate: '', expiry: '', amount: '',
           ddate: '', periodicins: ''
         };
 
         fields.forEach(f => {
           const cleanF = f.toLowerCase().replace(/[^a-z0-9]/g, '');
-          
+
           if (!initialMapping.email && (cleanF.includes('email') || cleanF.includes('emailaddress') || cleanF === 'to' || cleanF === 'recipient' || cleanF === 'contact')) {
-             initialMapping.email = f;
+            initialMapping.email = f;
           }
           if (!initialMapping.firstname && (cleanF.includes('firstname') || cleanF.includes('first') || cleanF.includes('givenname') || cleanF.includes('given'))) {
-             initialMapping.firstname = f;
+            initialMapping.firstname = f;
           }
           if (!initialMapping.name && (cleanF.includes('name') && !cleanF.includes('first'))) {
-             initialMapping.name = f;
+            initialMapping.name = f;
           }
           if (!initialMapping.yearmodel && (cleanF.includes('yearmodel') || cleanF.includes('model') || cleanF.includes('year'))) {
-             initialMapping.yearmodel = f;
+            initialMapping.yearmodel = f;
           }
           if (!initialMapping.unit && (cleanF.includes('unit') || cleanF.includes('vehicle') || cleanF.includes('car'))) {
-             initialMapping.unit = f;
+            initialMapping.unit = f;
           }
           if (!initialMapping.plate && cleanF.includes('plate')) {
-             initialMapping.plate = f;
+            initialMapping.plate = f;
           }
           if (!initialMapping.expiry && (cleanF.includes('expiry') || cleanF.includes('expire') || cleanF.includes('expiration'))) {
-             initialMapping.expiry = f;
+            initialMapping.expiry = f;
           }
           if (!initialMapping.amount && (cleanF.includes('amount') || cleanF.includes('premium') || cleanF.includes('check') || (cleanF.includes('payment') && !cleanF.includes('date')))) {
-             initialMapping.amount = f;
+            initialMapping.amount = f;
           }
           if (!initialMapping.ddate && (cleanF.includes('duedate') || cleanF.includes('ddate') || cleanF.includes('due') || cleanF.includes('date') || cleanF.includes('birthday'))) {
-             if (!cleanF.includes('expiry') && !cleanF.includes('expire') && !cleanF.includes('expiration')) {
-               initialMapping.ddate = f;
-             }
+            if (!cleanF.includes('expiry') && !cleanF.includes('expire') && !cleanF.includes('expiration')) {
+              initialMapping.ddate = f;
+            }
           }
           if (!initialMapping.periodicins && (cleanF.includes('periodicins') || cleanF.includes('amortization') || cleanF.includes('periodic') || cleanF.includes('installment'))) {
-             initialMapping.periodicins = f;
+            initialMapping.periodicins = f;
           }
         });
 
@@ -1139,7 +1141,7 @@ Encore Portal Admin`;
 
   const handleCsvImport = async () => {
     if (!csvFile || !user || csvData.length === 0) return;
-    
+
     if (!csvMapping.email) {
       toast.error('❌ Missing Email Mapping: Please map a column to Email.', { duration: 8000 });
       return;
@@ -1184,16 +1186,16 @@ Encore Portal Admin`;
       Object.keys(row).forEach(k => {
         let val = typeof row[k] === 'string' ? row[k].trim() : String(row[k] || '').trim();
         const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-        
+
         if (cleanK.includes('date') || cleanK.includes('birthday') || cleanK.includes('expiry')) {
-           val = formatToLongDate(val);
+          val = formatToLongDate(val);
         }
 
         normalizedContact[cleanK] = val;
-        
+
         const lowK = k.toLowerCase().replace(/\s+/g, '');
         normalizedContact[lowK] = val;
-        
+
         normalizedContact[k] = val;
       });
 
@@ -1206,53 +1208,53 @@ Encore Portal Admin`;
     }
 
     toast.loading(`Clearing existing contacts & importing ${batch.length} new records...`);
-        
-        try {
-          if (dbConnected === true) {
-            // First clear existing contacts
-            const contactsPath = `users/${user.uid}/contacts`;
-            const snapshot = await getDocs(collection(db, contactsPath));
-            for (const d of snapshot.docs) {
-              await deleteDoc(d.ref);
-            }
-            
-            // Then add new ones
-            const contactsRef = collection(db, contactsPath);
-            for (const contact of batch) {
-              await addDoc(contactsRef, contact);
-            }
-          } else {
-            // Local fallback
-            const localBatch = batch.map(c => ({
-              id: Math.random().toString(36).substring(2, 11),
-              ...c
-            }));
-            saveLocalContacts(localBatch);
-          }
-          toast.dismiss();
-          toast.success(`Successfully imported ${batch.length} contacts`);
-          if (csvFile) setImportedFileName(csvFile.name);
-          setCsvFile(null);
-          setCsvHeaders([]);
-          setCsvData([]);
-          setCsvMapping({});
-          setIsImporting(false);
-        } catch (err) {
-          console.warn("CSV import to Firestore failed, falling back to local import", err);
-          const localBatch = batch.map(c => ({
-            id: Math.random().toString(36).substring(2, 11),
-            ...c
-          }));
-          saveLocalContacts(localBatch);
-          toast.dismiss();
-          toast.success(`Imported ${batch.length} contacts (Local Mode)`);
-          if (csvFile) setImportedFileName(csvFile.name);
-          setCsvFile(null);
-          setCsvHeaders([]);
-          setCsvData([]);
-          setCsvMapping({});
-          setIsImporting(false);
+
+    try {
+      if (dbConnected === true) {
+        // First clear existing contacts
+        const contactsPath = `users/${user.uid}/contacts`;
+        const snapshot = await getDocs(collection(db, contactsPath));
+        for (const d of snapshot.docs) {
+          await deleteDoc(d.ref);
         }
+
+        // Then add new ones
+        const contactsRef = collection(db, contactsPath);
+        for (const contact of batch) {
+          await addDoc(contactsRef, contact);
+        }
+      } else {
+        // Local fallback
+        const localBatch = batch.map(c => ({
+          id: Math.random().toString(36).substring(2, 11),
+          ...c
+        }));
+        saveLocalContacts(localBatch);
+      }
+      toast.dismiss();
+      toast.success(`Successfully imported ${batch.length} contacts`);
+      if (csvFile) setImportedFileName(csvFile.name);
+      setCsvFile(null);
+      setCsvHeaders([]);
+      setCsvData([]);
+      setCsvMapping({});
+      setIsImporting(false);
+    } catch (err) {
+      console.warn("CSV import to Firestore failed, falling back to local import", err);
+      const localBatch = batch.map(c => ({
+        id: Math.random().toString(36).substring(2, 11),
+        ...c
+      }));
+      saveLocalContacts(localBatch);
+      toast.dismiss();
+      toast.success(`Imported ${batch.length} contacts (Local Mode)`);
+      if (csvFile) setImportedFileName(csvFile.name);
+      setCsvFile(null);
+      setCsvHeaders([]);
+      setCsvData([]);
+      setCsvMapping({});
+      setIsImporting(false);
+    }
   };
 
   const formatNumericValue = (val: any, key: string, isHtml: boolean = false): string => {
@@ -1270,7 +1272,7 @@ Encore Portal Admin`;
       }
       return strVal;
     }
-    
+
     // Check if the key indicates a monetary or general formatted amount/number
     // We definitely want to exclude keys that we should NOT format:
     // year, model, plate, expiry, date, phone, mobile, id, email, zip, code, pin, bday, birthday, timestamp, createdat, ref, index, number, account
@@ -1279,7 +1281,7 @@ Encore Portal Admin`;
 
     // Check if it's a financial key
     const isFinancialKey = [
-      'amount', 'periodicins', 'amort', 'ins', 'penalty', 'balance', 'unpaid', 'premium', 'payment', 
+      'amount', 'periodicins', 'amort', 'ins', 'penalty', 'balance', 'unpaid', 'premium', 'payment',
       'principal', 'interest', 'total', 'fine', 'fee', 'price', 'rate', 'value', 'cost', 'sum', 'due', 'charge'
     ].some(fin => lowerKey.includes(fin));
 
@@ -1287,11 +1289,11 @@ Encore Portal Admin`;
     // Let's strip standard prefixes like PHP, Php, ₱, $, or spaces to check if what is left is a clean number
     const prefixMatch = strVal.match(/^(PHP|Php|php|₱|\$|Rs|USD|EUR)\s*/i);
     const suffixMatch = strVal.match(/\s*(PHP|Php|php|₱|\$|USD|EUR)$/i);
-    
+
     let cleanVal = strVal;
     let prefix = '';
     let suffix = '';
-    
+
     if (prefixMatch) {
       prefix = prefixMatch[0];
       cleanVal = cleanVal.slice(prefix.length);
@@ -1299,10 +1301,10 @@ Encore Portal Admin`;
       suffix = suffixMatch[0];
       cleanVal = cleanVal.slice(0, cleanVal.length - suffix.length);
     }
-    
+
     // Strip commas if any to see if it's a numeric representation
     const rawDigits = cleanVal.replace(/,/g, '');
-    
+
     // Check if it is a valid decimal number (e.g., 3795 or 18540 or 12500.50)
     if (/^\d+(\.\d+)?$/.test(rawDigits)) {
       const num = parseFloat(rawDigits);
@@ -1322,7 +1324,7 @@ Encore Portal Admin`;
         }
       }
     }
-    
+
     return strVal;
   };
 
@@ -1398,11 +1400,11 @@ Encore Portal Admin`;
       toast.success('Contact removed (Local Mode)');
     }
   };
-  
+
   const clearContacts = async () => {
     if (!user) return;
     setIsConfirmClearOpen(false);
-    
+
     try {
       if (dbConnected === true) {
         const contactsPath = `users/${user.uid}/contacts`;
@@ -1429,7 +1431,7 @@ Encore Portal Admin`;
       toast.error("Please enter email and password");
       return;
     }
-    
+
     setIsAuthSubmitting(true);
     try {
       const normalizedEmail = authEmail.toLowerCase();
@@ -1468,7 +1470,7 @@ Encore Portal Admin`;
         },
         body: JSON.stringify({ subject, templateStyle })
       });
-      
+
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data.error || 'Failed to generate content');
@@ -1587,11 +1589,11 @@ Encore Portal Admin`;
     if (isFlyer) {
       // Parse URLs from body text. Strip out HTML tags first.
       const rawUrls = bodyText.replace(/<[^>]+>/g, '\n').split(/\n/).map(u => u.trim()).filter(u => u.startsWith('http'));
-      
-      const imagesHtml = rawUrls.length > 0 
+
+      const imagesHtml = rawUrls.length > 0
         ? rawUrls.map(url => `<img src="${url}" alt="Promotion Flyer" style="width: 100%; height: auto; max-width: 600px; display: block; margin: 0; padding: 0; outline: none; border: none;" referrerPolicy="no-referrer" />`).join('')
         : `<div style="padding: 40px; text-align: center; color: #666; font-size: 16px; font-family: sans-serif;">Please paste valid Image URLs into the email body (one URL per line) to generate the Flyer.</div>`;
-        
+
       return `
         <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; padding: 0; line-height: 0; font-size: 0;">
           ${imagesHtml}
@@ -1695,8 +1697,8 @@ Encore Portal Admin`;
     ]));
 
     if (requiredPlaceholders.length === 0 || contacts.length === 0) return [];
-    
-    return requiredPlaceholders.filter(p => 
+
+    return requiredPlaceholders.filter(p =>
       !contacts.some(c => c[p as keyof Contact] && String(c[p as keyof Contact]).trim() !== '')
     );
   };
@@ -1734,7 +1736,7 @@ Encore Portal Admin`;
       });
 
       if (!response.ok) throw new Error('Failed to send test email');
-      
+
       toast.success('Test email sent successfully!');
       setIsTestEmailOpen(false);
     } catch (err: any) {
@@ -1768,7 +1770,7 @@ Encore Portal Admin`;
       const messages = contacts.map(contact => {
         const personalizedBody = replacePlaceholders(body, contact, true);
         const personalizedSubject = replacePlaceholders(subject, contact, false);
-        
+
         const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
 
         return {
@@ -1777,11 +1779,11 @@ Encore Portal Admin`;
           body: htmlBody
         };
       });
-      
+
       const batchSize = 25;
       const totalBatches = Math.ceil(messages.length / batchSize);
       const delayBetweenBatches = 500;
-      
+
       setBlastQueue({
         totalBatches,
         currentBatchIndex: -1,
@@ -1834,7 +1836,7 @@ Encore Portal Admin`;
 
       let toastId: string | number | undefined;
       if (messages.length > batchSize) {
-         toastId = toast.loading(`Sending batch 1 of ${totalBatches}...`);
+        toastId = toast.loading(`Sending batch 1 of ${totalBatches}...`);
       }
 
       for (let i = 0; i < messages.length; i += batchSize) {
@@ -1853,10 +1855,10 @@ Encore Portal Admin`;
           await new Promise(resolve => setTimeout(resolve, 500));
         }
         setBlastQueue(prev => prev ? { ...prev, status: 'sending' } : prev);
-        
+
         const currentBatch = messages.slice(i, i + batchSize);
         const currentContactsBatch = contacts.slice(i, i + batchSize);
-        
+
         if (toastId) {
           toast.loading(`Sending batch ${batchNum} of ${totalBatches}...`, { id: toastId });
         }
@@ -1884,7 +1886,7 @@ Encore Portal Admin`;
           if (!response.ok) {
             throw new Error(data?.error || `Failed to send batch ${batchNum}`);
           }
-          
+
           if (data && Array.isArray(data.results)) {
             data.results.forEach((res: any, index: number) => {
               const contactObj = currentContactsBatch[index];
@@ -1915,7 +1917,7 @@ Encore Portal Admin`;
               });
             });
           }
-          
+
           setBlastQueue(prev => {
             if (!prev) return prev;
             const newBatches = [...prev.batches];
@@ -1935,7 +1937,7 @@ Encore Portal Admin`;
             failedContactsAccumulator.push(failedContact);
             finalizedContacts.push(failedContact);
           });
-          
+
           setBlastQueue(prev => {
             if (!prev) return prev;
             const newBatches = [...prev.batches];
@@ -1943,7 +1945,7 @@ Encore Portal Admin`;
             return { ...prev, batches: newBatches };
           });
         }
-        
+
         if (i + batchSize < messages.length) {
           await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
         }
@@ -1980,11 +1982,11 @@ Encore Portal Admin`;
           });
         }
       }
-      
+
       if (toastId) toast.dismiss(toastId);
 
-      const computedCampaignStatus = failedContactsAccumulator.length === 0 
-        ? ('success' as const) 
+      const computedCampaignStatus = failedContactsAccumulator.length === 0
+        ? ('success' as const)
         : (successCountAccumulator === 0 ? ('failed' as const) : ('partial' as const));
 
       // Final History update
@@ -2011,9 +2013,9 @@ Encore Portal Admin`;
       }
 
       toast.success(`Blast sent to ${contacts.length} recipients!`);
-      
+
       setBlastQueue(prev => prev ? { ...prev, status: 'completed' } : prev);
-      
+
       // Clear form after successful blast
       setSubject('');
       setBody('');
@@ -2037,15 +2039,15 @@ Encore Portal Admin`;
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
         <Toaster position="top-right" richColors />
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
         >
           <div className="bg-brand-600 p-8 flex flex-col items-center justify-center">
-            <img 
-              src="/assets/img/logo.png" 
-              alt="Encore Logo" 
+            <img
+              src="/assets/img/logo.png"
+              alt="Encore Logo"
               className="h-14 w-auto object-contain brightness-0 invert"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -2097,7 +2099,7 @@ Encore Portal Admin`;
                     </ol>
                   </div>
                   <div className="mt-2 pl-6 flex">
-                    <Button 
+                    <Button
                       type="button"
                       variant="outline"
                       size="sm"
@@ -2119,9 +2121,9 @@ Encore Portal Admin`;
               )}
               <div className="space-y-2">
                 <Label htmlFor="email">Email</Label>
-                <Input 
+                <Input
                   id="email"
-                  type="email" 
+                  type="email"
                   placeholder="name@encorefinancials.com"
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
@@ -2133,9 +2135,9 @@ Encore Portal Admin`;
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Password</Label>
                 </div>
-                <Input 
+                <Input
                   id="password"
-                  type="password" 
+                  type="password"
                   placeholder="••••••••"
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.target.value)}
@@ -2143,7 +2145,7 @@ Encore Portal Admin`;
                   required
                 />
               </div>
-              <Button 
+              <Button
                 type="submit"
                 disabled={isAuthSubmitting}
                 className="w-full h-11 bg-brand-600 hover:bg-brand-700 text-white font-medium shadow-lg shadow-brand-200 transition-all"
@@ -2157,7 +2159,7 @@ Encore Portal Admin`;
             </form>
 
 
-            
+
             <p className="text-[10px] text-gray-400 text-center">
               Restricted access. Authorized Encore employees only.
             </p>
@@ -2182,7 +2184,7 @@ Encore Portal Admin`;
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
         <Toaster position="top-right" richColors />
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
@@ -2196,12 +2198,12 @@ Encore Portal Admin`;
               Verification Required
             </p>
           </div>
-          
+
           <div className="p-8 space-y-6">
             <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
               <div className="border-t border-gray-100 pt-3 text-xs text-gray-600 space-y-2 leading-relaxed text-center">
                 <p>
-                  To secure your portal, you must verify your email address. 
+                  To secure your portal, you must verify your email address.
                   Please check your inbox at <strong>{user.email}</strong> and click the verification link.
                 </p>
                 <p className="text-[11px] text-gray-400 italic">
@@ -2246,7 +2248,7 @@ Encore Portal Admin`;
   if (user && userProfile && userProfile.status !== 'active') {
     return (
       <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden"
@@ -2264,7 +2266,7 @@ Encore Portal Admin`;
               Encore Leasing & Finance Corp.
             </p>
           </div>
-          
+
           <div className="p-8 space-y-6">
             <div className="bg-gray-50 border border-gray-100 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-3">
@@ -2280,7 +2282,7 @@ Encore Portal Admin`;
                   <p className="text-[10px] text-gray-500">{userProfile.email}</p>
                 </div>
               </div>
-              
+
               <div className="border-t border-gray-100 pt-3 text-xs text-gray-600 space-y-2 leading-relaxed">
                 {userProfile.status === 'pending' ? (
                   <p>
@@ -2314,14 +2316,14 @@ Encore Portal Admin`;
   return (
     <div className="min-h-screen bg-[#F8F9FA] text-[#1A1A1A] font-sans selection:bg-brand-100">
       <Toaster position="top-right" richColors />
-      
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img 
-              src="/assets/img/logo.png" 
-              alt="Encore Logo" 
+            <img
+              src="/assets/img/logo.png"
+              alt="Encore Logo"
               className="h-10 w-auto object-contain"
               referrerPolicy="no-referrer"
               onError={(e) => {
@@ -2340,31 +2342,31 @@ Encore Portal Admin`;
               <h1 className="text-xl font-bold tracking-tight">Encore</h1>
             </div>
           </div>
-            <div className="flex items-center gap-6">
-              {dbConnected === true && (
-                <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 hidden md:flex">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Database Connected
+          <div className="flex items-center gap-6">
+            {dbConnected === true && (
+              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 gap-1 hidden md:flex">
+                <CheckCircle2 className="w-3 h-3" />
+                Database Connected
+              </Badge>
+            )}
+            {dbConnected === false && (
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1 hidden md:flex">
+                  <AlertCircle className="w-3 h-3" />
+                  Database Disconnected
                 </Badge>
-              )}
-              {dbConnected === false && (
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200 gap-1 hidden md:flex">
-                    <AlertCircle className="w-3 h-3" />
-                    Database Disconnected
-                  </Badge>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={triggerConnectionCheck}
-                    disabled={retryLoading}
-                    className="h-7 text-xs px-2 text-[#4B5563] hover:text-[#111827] hover:bg-gray-100 flex items-center gap-1.5"
-                  >
-                    <RefreshCw className={`w-3 h-3 ${retryLoading ? 'animate-spin' : ''}`} />
-                    <span>{retryLoading ? 'Checking...' : 'Check Database'}</span>
-                  </Button>
-                </div>
-              )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={triggerConnectionCheck}
+                  disabled={retryLoading}
+                  className="h-7 text-xs px-2 text-[#4B5563] hover:text-[#111827] hover:bg-gray-100 flex items-center gap-1.5"
+                >
+                  <RefreshCw className={`w-3 h-3 ${retryLoading ? 'animate-spin' : ''}`} />
+                  <span>{retryLoading ? 'Checking...' : 'Check Database'}</span>
+                </Button>
+              </div>
+            )}
             {configStatus && (!configStatus.hasSmtpConfig || !configStatus.smtpWorking) && (
               <Badge variant="destructive" className="animate-pulse">
                 <AlertCircle className="w-3 h-3 mr-1" />
@@ -2376,9 +2378,9 @@ Encore Portal Admin`;
                 <p className="text-xs font-bold text-gray-900 leading-none">{user.displayName || 'Team Member'}</p>
                 <p className="text-[10px] text-gray-500 mt-1">{user.email}</p>
               </div>
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => signOut(auth)}
                 className="text-gray-400 hover:text-red-600 hover:bg-red-50"
                 title="Sign Out"
@@ -2417,154 +2419,154 @@ Encore Portal Admin`;
                 </TabsTrigger>
               )}
             </TabsList>
-            
+
             {contacts.length > 0 && (
               <div className="flex gap-2">
-              <Button 
-                onClick={sendBlast} 
-                disabled={isSending || isScheduling || !subject || !body}
-                className="bg-brand-600 hover:bg-brand-700 text-white px-6 shadow-lg shadow-brand-200 transition-all active:scale-95"
-              >
-                {isSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                Send Now
-              </Button>
-              <Dialog open={isTestEmailOpen} onOpenChange={setIsTestEmailOpen}>
-                <DialogTrigger render={
-                  <Button 
-                    variant="outline"
-                    disabled={isSending || isScheduling || !subject || !body}
-                    className="border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm"
-                  >
-                    Test Email
-                  </Button>
-                } />
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Send Test Email</DialogTitle>
-                    <DialogDescription>
-                      Send a preview of this campaign to yourself or a team member before blasting to all contacts.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="py-4">
-                    <Label htmlFor="test-email" className="mb-2 block text-sm font-medium">Test Recipient Email</Label>
-                    <Input 
-                      type="email" 
-                      id="test-email"
-                      value={testEmailAddress}
-                      onChange={(e) => setTestEmailAddress(e.target.value)}
-                      placeholder="e.g. you@encorefinancials.com"
-                    />
-                  </div>
-                  <DialogFooter>
-                    <Button variant="ghost" onClick={() => setIsTestEmailOpen(false)}>Cancel</Button>
-                    <Button 
-                      className="bg-brand-600 hover:bg-brand-700 text-white"
-                      disabled={!testEmailAddress || isSendingTest}
-                      onClick={handleSendTestEmail}
+                <Button
+                  onClick={sendBlast}
+                  disabled={isSending || isScheduling || !subject || !body}
+                  className="bg-brand-600 hover:bg-brand-700 text-white px-6 shadow-lg shadow-brand-200 transition-all active:scale-95"
+                >
+                  {isSending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                  Send Now
+                </Button>
+                <Dialog open={isTestEmailOpen} onOpenChange={setIsTestEmailOpen}>
+                  <DialogTrigger render={
+                    <Button
+                      variant="outline"
+                      disabled={isSending || isScheduling || !subject || !body}
+                      className="border-gray-200 text-gray-700 hover:bg-gray-50 shadow-sm"
                     >
-                      {isSendingTest ? 'Sending...' : 'Send Test'}
+                      Test Email
                     </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-              <Dialog open={isScheduleOpen} onOpenChange={setIsScheduleOpen}>
-                <DialogTrigger render={
-                  <Button 
-                    variant="outline"
-                    disabled={isSending || isScheduling || !subject || !body}
-                    className="border-brand-200 text-brand-700 hover:bg-brand-50 shadow-sm"
-                  >
-                    Schedule
-                  </Button>
-                } />
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Schedule Campaign</DialogTitle>
-                    <DialogDescription>
-                      Select a date and time to send this email blast.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="py-4">
-                    <Label htmlFor="schedule-time" className="mb-2 block text-sm font-medium">Select Date & Time</Label>
-                    <input 
-                      type="datetime-local" 
-                      id="schedule-time"
-                      value={scheduledDate}
-                      onChange={(e) => setScheduledDate(e.target.value)}
-                      className="w-full flex h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                      min={new Date().toISOString().slice(0, 16)}
-                      required
-                    />
-                  </div>
-                  <DialogFooter>
-                    <Button variant="ghost" onClick={() => setIsScheduleOpen(false)}>Cancel</Button>
-                    <Button 
-                      className="bg-brand-600 hover:bg-brand-700 text-white"
-                      disabled={!scheduledDate || isScheduling}
-                      onClick={async () => {
-                        if (!scheduledDate) return;
-                        setIsScheduling(true);
-                        try {
-                          const messages = contacts.map(contact => {
-                            const personalizedBody = replacePlaceholders(body, contact, true);
-                            const personalizedSubject = replacePlaceholders(subject, contact, false);
-                            const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
-                            return {
-                              to: [contact.email],
-                              subject: personalizedSubject,
-                              body: htmlBody
-                            };
-                          });
-
-                          const response = await fetch('/api/schedule-blast', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              messages,
-                              scheduledFor: new Date(scheduledDate).toISOString()
-                            })
-                          });
-
-                          const data = await response.json();
-                          if (!response.ok) throw new Error(data.error || 'Failed to schedule');
-                          
-                          toast.success('Campaign scheduled successfully!');
-                          setIsScheduleOpen(false);
-                          
-                          // Save history stub
-                          const historyItem = {
-                            timestamp: new Date().toLocaleString(),
-                            subject,
-                            body,
-                            recipientCount: contacts.length,
-                            status: 'scheduled' as const,
-                            successCount: 0,
-                            failedCount: 0,
-                            failedContacts: [],
-                            recipients: contacts.map(c => ({ email: c.email, name: c.name })),
-                            rawContacts: contacts,
-                            createdAt: new Date().toISOString(),
-                            scheduledFor: new Date(scheduledDate).toISOString()
-                          };
-
-                          if (user && dbConnected) {
-                            const historyPath = `users/${user.uid}/history`;
-                            await addDoc(collection(db, historyPath), historyItem);
-                          }
-                          
-                        } catch (err: any) {
-                          toast.error(err.message || 'Failed to schedule campaign');
-                        } finally {
-                          setIsScheduling(false);
-                        }
-                      }}
+                  } />
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Send Test Email</DialogTitle>
+                      <DialogDescription>
+                        Send a preview of this campaign to yourself or a team member before blasting to all contacts.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Label htmlFor="test-email" className="mb-2 block text-sm font-medium">Test Recipient Email</Label>
+                      <Input
+                        type="email"
+                        id="test-email"
+                        value={testEmailAddress}
+                        onChange={(e) => setTestEmailAddress(e.target.value)}
+                        placeholder="e.g. you@encorefinancials.com"
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button variant="ghost" onClick={() => setIsTestEmailOpen(false)}>Cancel</Button>
+                      <Button
+                        className="bg-brand-600 hover:bg-brand-700 text-white"
+                        disabled={!testEmailAddress || isSendingTest}
+                        onClick={handleSendTestEmail}
+                      >
+                        {isSendingTest ? 'Sending...' : 'Send Test'}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+                <Dialog open={isScheduleOpen} onOpenChange={setIsScheduleOpen}>
+                  <DialogTrigger render={
+                    <Button
+                      variant="outline"
+                      disabled={isSending || isScheduling || !subject || !body}
+                      className="border-brand-200 text-brand-700 hover:bg-brand-50 shadow-sm"
                     >
+                      Schedule
+                    </Button>
+                  } />
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Schedule Campaign</DialogTitle>
+                      <DialogDescription>
+                        Select a date and time to send this email blast.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="py-4">
+                      <Label htmlFor="schedule-time" className="mb-2 block text-sm font-medium">Select Date & Time</Label>
+                      <input
+                        type="datetime-local"
+                        id="schedule-time"
+                        value={scheduledDate}
+                        onChange={(e) => setScheduledDate(e.target.value)}
+                        className="w-full flex h-10 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm ring-offset-white file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        min={new Date().toISOString().slice(0, 16)}
+                        required
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button variant="ghost" onClick={() => setIsScheduleOpen(false)}>Cancel</Button>
+                      <Button
+                        className="bg-brand-600 hover:bg-brand-700 text-white"
+                        disabled={!scheduledDate || isScheduling}
+                        onClick={async () => {
+                          if (!scheduledDate) return;
+                          setIsScheduling(true);
+                          try {
+                            const messages = contacts.map(contact => {
+                              const personalizedBody = replacePlaceholders(body, contact, true);
+                              const personalizedSubject = replacePlaceholders(subject, contact, false);
+                              const htmlBody = generateEmailHtml(personalizedSubject, personalizedBody);
+                              return {
+                                to: [contact.email],
+                                subject: personalizedSubject,
+                                body: htmlBody
+                              };
+                            });
+
+                            const response = await fetch('/api/schedule-blast', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                messages,
+                                scheduledFor: new Date(scheduledDate).toISOString()
+                              })
+                            });
+
+                            const data = await response.json();
+                            if (!response.ok) throw new Error(data.error || 'Failed to schedule');
+
+                            toast.success('Campaign scheduled successfully!');
+                            setIsScheduleOpen(false);
+
+                            // Save history stub
+                            const historyItem = {
+                              timestamp: new Date().toLocaleString(),
+                              subject,
+                              body,
+                              recipientCount: contacts.length,
+                              status: 'scheduled' as const,
+                              successCount: 0,
+                              failedCount: 0,
+                              failedContacts: [],
+                              recipients: contacts.map(c => ({ email: c.email, name: c.name })),
+                              rawContacts: contacts,
+                              createdAt: new Date().toISOString(),
+                              scheduledFor: new Date(scheduledDate).toISOString()
+                            };
+
+                            if (user && dbConnected) {
+                              const historyPath = `users/${user.uid}/history`;
+                              await addDoc(collection(db, historyPath), historyItem);
+                            }
+
+                          } catch (err: any) {
+                            toast.error(err.message || 'Failed to schedule campaign');
+                          } finally {
+                            setIsScheduling(false);
+                          }
+                        }}
+                      >
                         {isScheduling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                         Confirm Schedule
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
               </div>
             )}
           </div>
@@ -2781,7 +2783,7 @@ Encore Portal Admin`;
                           Live Blast Queue {blastQueue.status === 'paused' ? '(Paused)' : blastQueue.status === 'completed' ? '(Completed)' : blastQueue.status === 'error' ? '(Error)' : '(Sending)'}
                         </CardTitle>
                         <Badge variant="outline" className="bg-white border-brand-200 text-brand-700">
-                           {blastQueue.batches.filter(b => b.status === 'completed' || b.status === 'error').length} / {blastQueue.totalBatches} Batches
+                          {blastQueue.batches.filter(b => b.status === 'completed' || b.status === 'error').length} / {blastQueue.totalBatches} Batches
                         </Badge>
                       </div>
                     </CardHeader>
@@ -2791,7 +2793,7 @@ Encore Portal Admin`;
                           let bgColor = "bg-white";
                           let borderColor = "border-gray-200";
                           let textColor = "text-gray-500";
-                          
+
                           if (batch.status === 'processing') {
                             bgColor = "bg-brand-100";
                             borderColor = "border-brand-400";
@@ -2807,7 +2809,7 @@ Encore Portal Admin`;
                           }
 
                           return (
-                            <div 
+                            <div
                               key={batch.batchNum}
                               className={`flex flex-col items-center justify-center min-w-[3.5rem] h-12 rounded-md border text-xs transition-all ${bgColor} ${borderColor}`}
                               title={`Batch ${batch.batchNum}: ${batch.size} emails (${batch.status})`}
@@ -2831,10 +2833,10 @@ Encore Portal Admin`;
                       <h3 className="text-lg font-bold text-gray-900">Blast Analytics</h3>
                       <p className="text-sm text-gray-500">Track and view performance metrics</p>
                     </div>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      onClick={refreshAnalytics} 
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={refreshAnalytics}
                       disabled={isRefreshingAnalytics || !dbConnected}
                       className="text-brand-600 border-brand-200 hover:bg-brand-50 bg-white"
                     >
@@ -2844,67 +2846,67 @@ Encore Portal Admin`;
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <Card className="border-gray-200 shadow-sm">
-                    <CardHeader className="pb-2">
-                      <CardTitle>Monthly Email Volume</CardTitle>
-                      <CardDescription>Total sent emails broken down by month</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {blastAnalytics.monthlyVolume.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-10 text-gray-400">
-                          <p className="text-sm">No monthly data available.</p>
-                        </div>
-                      ) : (
-                        <div className="h-64 mt-4">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={blastAnalytics.monthlyVolume} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
-                              <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
-                              <Tooltip
-                                cursor={{ fill: 'rgba(0,0,0,0.02)' }}
-                                contentStyle={{ borderRadius: '8px', border: '1px solid #f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '11px', padding: '8px' }}
-                              />
-                              <Bar dataKey="sent" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
+                      <CardHeader className="pb-2">
+                        <CardTitle>Monthly Email Volume</CardTitle>
+                        <CardDescription>Total sent emails broken down by month</CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        {blastAnalytics.monthlyVolume.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 text-gray-400">
+                            <p className="text-sm">No monthly data available.</p>
+                          </div>
+                        ) : (
+                          <div className="h-64 mt-4">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart data={blastAnalytics.monthlyVolume} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280' }} />
+                                <Tooltip
+                                  cursor={{ fill: 'rgba(0,0,0,0.02)' }}
+                                  contentStyle={{ borderRadius: '8px', border: '1px solid #f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '11px', padding: '8px' }}
+                                />
+                                <Bar dataKey="sent" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
 
-                  <Card className="border-gray-200 shadow-sm flex flex-col">
-                    <CardHeader className="pb-2">
-                      <CardTitle>Top Templates Used</CardTitle>
-                      <CardDescription>Most frequently used subject lines across blasts</CardDescription>
-                    </CardHeader>
-                    <CardContent className="flex-1">
-                      {blastAnalytics.topTemplates.length === 0 ? (
-                         <div className="flex flex-col items-center justify-center py-10 text-gray-400 h-full">
-                           <p className="text-sm">No templates used yet.</p>
-                         </div>
-                      ) : (
-                        <div className="space-y-3 mt-2">
-                          {blastAnalytics.topTemplates.map((template, idx) => (
-                            <div key={idx} className="flex flex-col bg-white hover:bg-gray-50 border border-gray-100 rounded-lg p-3.5 transition-colors shadow-sm">
-                               <div className="flex items-start justify-between gap-4">
+                    <Card className="border-gray-200 shadow-sm flex flex-col">
+                      <CardHeader className="pb-2">
+                        <CardTitle>Top Templates Used</CardTitle>
+                        <CardDescription>Most frequently used subject lines across blasts</CardDescription>
+                      </CardHeader>
+                      <CardContent className="flex-1">
+                        {blastAnalytics.topTemplates.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-10 text-gray-400 h-full">
+                            <p className="text-sm">No templates used yet.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3 mt-2">
+                            {blastAnalytics.topTemplates.map((template, idx) => (
+                              <div key={idx} className="flex flex-col bg-white hover:bg-gray-50 border border-gray-100 rounded-lg p-3.5 transition-colors shadow-sm">
+                                <div className="flex items-start justify-between gap-4">
                                   <h4 className="font-medium text-sm text-gray-700 line-clamp-2 leading-relaxed">{template.subject}</h4>
                                   <span className="bg-brand-50 text-brand-700 border border-brand-100 text-[11px] font-bold px-2.5 py-1 rounded-full whitespace-nowrap shrink-0">
                                     {template.count} {template.count === 1 ? 'use' : 'uses'}
                                   </span>
-                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
               </motion.div>
             </TabsContent>
 
             {/* Compose Tab */}
             <TabsContent value="compose" key="compose-content">
-              <motion.div 
+              <motion.div
                 key="compose-motion"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -2924,8 +2926,8 @@ Encore Portal Admin`;
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <Dialog 
-                          open={isImporting} 
+                        <Dialog
+                          open={isImporting}
                           onOpenChange={(open) => {
                             if (!open) {
                               setCsvFile(null);
@@ -2951,10 +2953,10 @@ Encore Portal Admin`;
                             </DialogHeader>
                             <div className="space-y-4 py-4">
                               <div className="p-4 border-2 border-dashed border-gray-200 rounded-lg text-center">
-                                <input 
-                                  type="file" 
-                                  accept=".csv" 
-                                  className="hidden" 
+                                <input
+                                  type="file"
+                                  accept=".csv"
+                                  className="hidden"
                                   id="csv-upload-compose"
                                   onChange={handleFileSelect}
                                 />
@@ -2988,9 +2990,9 @@ Encore Portal Admin`;
                         {contacts.length > 0 && (
                           <Dialog open={isConfirmClearOpen} onOpenChange={setIsConfirmClearOpen}>
                             <DialogTrigger render={
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 className="text-white hover:bg-white/10"
                               >
                                 <Trash2 className="w-4 h-4 mr-2" />
@@ -3059,8 +3061,8 @@ Encore Portal Admin`;
                               ))}
                             </SelectContent>
                           </Select>
-                          <Button 
-                            variant="outline" 
+                          <Button
+                            variant="outline"
                             size="sm"
                             onClick={() => setIsPreviewOpen(true)}
                             disabled={!body}
@@ -3081,22 +3083,22 @@ Encore Portal Admin`;
                               <span className="text-xs font-semibold text-brand-900">Campaign Header Banner Image (Optional)</span>
                             </div>
                             {bannerImageUrl && (
-                              <button 
+                              <button
                                 type="button"
-                                onClick={() => setBannerImageUrl('')} 
+                                onClick={() => setBannerImageUrl('')}
                                 className="text-[10px] text-red-650 hover:underline font-medium"
                               >
                                 Remove Image
                               </button>
                             )}
                           </div>
-                          
+
                           <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
                             <div className="md:col-span-5 space-y-1">
                               <label htmlFor="bannerUrl" className="text-[10px] text-gray-500 uppercase tracking-wider font-bold block">Custom Image Link:</label>
-                              <Input 
+                              <Input
                                 id="bannerUrl"
-                                placeholder="Paste image address (https://...)" 
+                                placeholder="Paste image address (https://...)"
                                 value={bannerImageUrl}
                                 onChange={(e) => setBannerImageUrl(e.target.value)}
                                 className="h-8 text-xs bg-white border-brand-200/60 focus:ring-brand-500"
@@ -3108,46 +3110,43 @@ Encore Portal Admin`;
                                 <button
                                   type="button"
                                   onClick={() => setBannerImageUrl('https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=600&auto=format&fit=crop&q=80')}
-                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${
-                                    bannerImageUrl.includes('photo-1460925895917')
+                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${bannerImageUrl.includes('photo-1460925895917')
                                       ? 'bg-brand-600 text-white border-transparent'
                                       : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700 font-normal'
-                                  }`}
+                                    }`}
                                 >
                                   📈 Business Growth
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setBannerImageUrl('https://images.unsplash.com/photo-1557804506-669a67965ba0?w=600&auto=format&fit=crop&q=80')}
-                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${
-                                    bannerImageUrl.includes('photo-1557804506')
+                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${bannerImageUrl.includes('photo-1557804506')
                                       ? 'bg-brand-600 text-white border-transparent'
                                       : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700 font-normal'
-                                  }`}
+                                    }`}
                                 >
                                   🚀 Announcement
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setBannerImageUrl('https://images.unsplash.com/photo-1513151233558-d860c5398176?w=600&auto=format&fit=crop&q=80')}
-                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${
-                                    bannerImageUrl.includes('photo-1513151233')
+                                  className={`px-2 py-1 text-[10px] rounded-md font-medium border transition-all ${bannerImageUrl.includes('photo-1513151233')
                                       ? 'bg-brand-600 text-white border-transparent'
                                       : 'bg-white hover:bg-gray-50 border-gray-200 text-gray-700 font-normal'
-                                  }`}
+                                    }`}
                                 >
                                   🎉 Special Promo
                                 </button>
                               </div>
                             </div>
                           </div>
-                          
+
                           {bannerImageUrl && (
                             <div className="relative rounded-lg overflow-hidden border border-brand-100 max-h-[140px] bg-white flex items-center justify-center">
-                              <img 
-                                src={bannerImageUrl} 
-                                alt="Banner preview" 
-                                className="object-cover w-full h-[100px] md:h-[120px]" 
+                              <img
+                                src={bannerImageUrl}
+                                alt="Banner preview"
+                                className="object-cover w-full h-[100px] md:h-[120px]"
                                 onError={(e) => {
                                   e.currentTarget.style.display = 'none';
                                 }}
@@ -3156,12 +3155,12 @@ Encore Portal Admin`;
                           )}
                         </div>
                       )}
-                      
+
                       <div className="space-y-2">
                         <Label htmlFor="subject">Subject Line</Label>
-                        <Input 
-                          id="subject" 
-                          placeholder="e.g. Special Offer: 20% Off Everything!" 
+                        <Input
+                          id="subject"
+                          placeholder="e.g. Special Offer: 20% Off Everything!"
                           value={subject}
                           onChange={(e) => setSubject(e.target.value)}
                           className="h-12 border-gray-200 focus:ring-brand-500"
@@ -3173,16 +3172,16 @@ Encore Portal Admin`;
                           <div className="flex items-center gap-2">
                             {templateStyle === 'flyer' && (
                               <>
-                                <input 
-                                  type="file" 
-                                  ref={imageInputRef} 
-                                  onChange={handleImageUpload} 
-                                  accept="image/*" 
-                                  className="hidden" 
+                                <input
+                                  type="file"
+                                  ref={imageInputRef}
+                                  onChange={handleImageUpload}
+                                  accept="image/*"
+                                  className="hidden"
                                 />
-                                <Button 
-                                  variant="outline" 
-                                  size="sm" 
+                                <Button
+                                  variant="outline"
+                                  size="sm"
                                   onClick={() => imageInputRef.current?.click()}
                                   disabled={isUploadingImage}
                                   className="text-brand-600 border-brand-200 hover:bg-brand-50 h-8"
@@ -3193,9 +3192,9 @@ Encore Portal Admin`;
                               </>
                             )}
                             {templateStyle !== 'visual' && (
-                              <Button 
-                                variant="ghost" 
-                                size="sm" 
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={generateContent}
                                 disabled={isGenerating}
                                 className="text-brand-600 hover:text-brand-700 hover:bg-brand-50"
@@ -3217,9 +3216,9 @@ Encore Portal Admin`;
                             </Button>
                           </div>
                         ) : (
-                          <Textarea 
-                            id="body" 
-                            placeholder="Write your email here..." 
+                          <Textarea
+                            id="body"
+                            placeholder="Write your email here..."
                             className="min-h-[300px] border-gray-200 focus:ring-brand-500 leading-relaxed"
                             value={body}
                             onChange={(e) => setBody(e.target.value)}
@@ -3243,7 +3242,7 @@ Encore Portal Admin`;
                         )}
                         {contacts.length > 0 && missingPlaceholders.length === 0 && (subject || body) && (
                           <AnimatePresence>
-                            <motion.div 
+                            <motion.div
                               initial={{ opacity: 0, height: 0 }}
                               animate={{ opacity: 1, height: 'auto' }}
                               className="flex items-center gap-2 mt-3 p-3 bg-green-50 rounded-lg text-green-800 border border-green-200 shadow-sm"
@@ -3269,13 +3268,13 @@ Encore Portal Admin`;
                       </CardHeader>
                       <CardContent>
                         <p className="text-xs text-red-700 leading-relaxed">
-                          {!configStatus.hasSmtpConfig 
+                          {!configStatus.hasSmtpConfig
                             ? <>Your <strong>Brevo API key</strong> is missing. Emails cannot be sent until you supply the <strong>BREVO_API_KEY</strong> key to the <strong>Secrets</strong> panel in AI Studio settings.</>
                             : <>Your <strong>Brevo API key</strong> is configured but the connection failed. Error: {configStatus.smtpError || 'Unknown Error'}. Please verify your Brevo API credentials.</>
                           }
                         </p>
-                        <Button 
-                          variant="link" 
+                        <Button
+                          variant="link"
                           className="text-xs p-0 h-auto text-red-800 font-bold mt-2"
                           onClick={() => window.open('https://app.brevo.com/settings/keys/api', '_blank')}
                         >
@@ -3303,7 +3302,7 @@ Encore Portal Admin`;
                           <p className="font-bold">Subject: <span className="font-normal text-gray-500">{subject || '(No subject)'}</span></p>
                         </div>
                       </div>
-                      
+
                       <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg">
                         <p className="text-[10px] text-amber-800 leading-tight">
                           <strong>Note:</strong> Campaign is configured to send via Brevo API. Ensure you follow Brevo's sending limits and have your domain verified.
@@ -3331,7 +3330,7 @@ Encore Portal Admin`;
                             <span>{blastProgress.total > 0 ? Math.round((blastProgress.current / blastProgress.total) * 100) : 0}%</span>
                           </div>
                           <div className="w-full bg-brand-200 rounded-full h-2">
-                            <div 
+                            <div
                               className="bg-brand-600 h-2 rounded-full transition-all duration-300 ease-out"
                               style={{ width: `${blastProgress.total > 0 ? Math.round((blastProgress.current / blastProgress.total) * 100) : 0}%` }}
                             ></div>
@@ -3356,7 +3355,7 @@ Encore Portal Admin`;
                             <div className="text-brand-900 font-bold text-xl">{blastProgress.failed}</div>
                           </div>
                         </div>
-                        
+
                         <div className="pt-2 flex gap-2">
                           {!isPaused ? (
                             <Button size="sm" variant="outline" className="w-full text-brand-700 bg-white border-brand-200" onClick={() => setIsPaused(true)}>
@@ -3379,7 +3378,7 @@ Encore Portal Admin`;
 
             {/* Contacts Tab */}
             <TabsContent value="contacts" key="contacts-content">
-              <motion.div 
+              <motion.div
                 key="contacts-motion"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -3394,19 +3393,19 @@ Encore Portal Admin`;
                   <CardContent className="space-y-4">
                     <div className="space-y-2">
                       <Label htmlFor="name">Name (Optional)</Label>
-                      <Input 
-                        id="name" 
-                        placeholder="John Doe" 
+                      <Input
+                        id="name"
+                        placeholder="John Doe"
                         value={newName}
                         onChange={(e) => setNewName(e.target.value)}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="email">Email Address</Label>
-                      <Input 
-                        id="email" 
-                        type="email" 
-                        placeholder="john@example.com" 
+                      <Input
+                        id="email"
+                        type="email"
+                        placeholder="john@example.com"
                         value={newEmail}
                         onChange={(e) => setNewEmail(e.target.value)}
                       />
@@ -3447,22 +3446,22 @@ Encore Portal Admin`;
                           <Users className="w-12 h-12 mb-4 opacity-20" />
                           <p>No contacts added yet</p>
                         </div>
-                      ) : contacts.filter(contact => 
-                            (contact.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())) || 
-                            (contact.email.toLowerCase().includes(contactSearchQuery.toLowerCase()))
-                          ).length === 0 ? (
+                      ) : contacts.filter(contact =>
+                        (contact.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())) ||
+                        (contact.email.toLowerCase().includes(contactSearchQuery.toLowerCase()))
+                      ).length === 0 ? (
                         <div className="flex flex-col items-center justify-center py-20 text-gray-400">
                           <Search className="w-12 h-12 mb-4 opacity-20" />
                           <p>No contacts found matching "{contactSearchQuery}"</p>
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          {contacts.filter(contact => 
-                            (contact.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())) || 
+                          {contacts.filter(contact =>
+                            (contact.name?.toLowerCase().includes(contactSearchQuery.toLowerCase())) ||
                             (contact.email.toLowerCase().includes(contactSearchQuery.toLowerCase()))
                           ).map((contact) => (
-                            <div 
-                              key={contact.id} 
+                            <div
+                              key={contact.id}
                               className="flex items-center justify-between p-4 bg-white border border-gray-100 rounded-xl hover:border-brand-200 hover:shadow-md transition-all group"
                             >
                               <div className="flex items-center gap-4">
@@ -3474,9 +3473,9 @@ Encore Portal Admin`;
                                   <p className="text-sm text-gray-500">{contact.email}</p>
                                 </div>
                               </div>
-                              <Button 
-                                variant="ghost" 
-                                size="icon" 
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => removeContact(contact.id)}
                                 className="text-gray-400 hover:text-red-600 hover:bg-red-50 opacity-0 group-hover:opacity-100 transition-opacity"
                               >
@@ -3494,7 +3493,7 @@ Encore Portal Admin`;
 
             {/* History Tab */}
             <TabsContent value="history" key="history-content">
-              <motion.div 
+              <motion.div
                 key="history-motion"
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -3513,7 +3512,7 @@ Encore Portal Admin`;
                           <BarChart data={
                             [...history].reverse().slice(0, 10).reverse().map((item, i) => {
                               let st = 'N/A';
-                              try { st = new Date(item.timestamp).toLocaleDateString(undefined, {month: 'short', day: 'numeric'}) } catch(e){}
+                              try { st = new Date(item.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) } catch (e) { }
                               return {
                                 name: `Camp ${i + 1}`,
                                 date: st,
@@ -3525,9 +3524,9 @@ Encore Portal Admin`;
                           } margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                             <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
                             <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
-                            <Tooltip 
-                              cursor={{ fill: 'rgba(0,0,0,0.04)' }} 
-                              contentStyle={{ borderRadius: '8px', border: '1px solid #f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px 12px' }} 
+                            <Tooltip
+                              cursor={{ fill: 'rgba(0,0,0,0.04)' }}
+                              contentStyle={{ borderRadius: '8px', border: '1px solid #f3f4f6', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '8px 12px' }}
                               labelFormatter={(label, payload) => payload && payload.length > 0 ? payload[0].payload.tooltipName : label}
                             />
                             <Bar dataKey="Sent" stackId="a" fill="#16a34a" radius={[0, 0, 4, 4]} barSize={40} />
@@ -3601,9 +3600,9 @@ Encore Portal Admin`;
                                 <td className="py-4 text-right">
                                   <div className="flex justify-end items-center gap-2">
                                     {(item.failedCount || 0) > 0 && (
-                                      <Button 
-                                        variant="outline" 
-                                        size="sm" 
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
                                         className="text-red-600 border-red-200 hover:bg-red-50 bg-white"
                                         onClick={() => handleRetryFailedEmails(item)}
                                         title={`Retry ${item.failedCount} Failed Emails`}
@@ -3611,9 +3610,9 @@ Encore Portal Admin`;
                                         <RefreshCw className="w-3.5 h-3.5" />
                                       </Button>
                                     )}
-                                    <Button 
-                                      variant="ghost" 
-                                      size="sm" 
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
                                       className="text-brand-600 hover:bg-brand-50"
                                       onClick={() => setSelectedHistory(item)}
                                     >
@@ -3742,8 +3741,8 @@ Encore Portal Admin`;
                                 className="h-10"
                               />
                             </div>
-                            <Button 
-                              type="submit" 
+                            <Button
+                              type="submit"
                               className="w-full h-10 bg-brand-600 hover:bg-brand-700 text-white font-medium"
                             >
                               Add Whitelisted Member
@@ -3767,7 +3766,7 @@ Encore Portal Admin`;
                               className="pl-9 h-10 w-full"
                             />
                           </div>
-                          <Button 
+                          <Button
                             onClick={() => setIsCreateUserOpen(true)}
                             className="bg-brand-600 hover:bg-brand-700 text-white shadow-sm"
                           >
@@ -3820,7 +3819,7 @@ Encore Portal Admin`;
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="createUserRole">Role</Label>
-                              <select 
+                              <select
                                 id="createUserRole"
                                 value={createUserRole}
                                 onChange={(e) => setCreateUserRole(e.target.value as 'super_admin' | 'marketing' | 'user')}
@@ -3834,8 +3833,8 @@ Encore Portal Admin`;
                           </div>
                           <DialogFooter>
                             <Button variant="ghost" onClick={() => setIsCreateUserOpen(false)}>Cancel</Button>
-                            <Button 
-                              onClick={handleCreateUser} 
+                            <Button
+                              onClick={handleCreateUser}
                               disabled={isCreatingUser}
                               className="bg-brand-600 hover:bg-brand-700 text-white"
                             >
@@ -3877,8 +3876,8 @@ Encore Portal Admin`;
                           <div className="space-y-4 pt-4">
                             <div className="space-y-2">
                               <Label htmlFor="editUserName">Name</Label>
-                              <Input 
-                                id="editUserName" 
+                              <Input
+                                id="editUserName"
                                 placeholder="E.g. John Doe"
                                 value={editUserName}
                                 onChange={(e) => setEditUserName(e.target.value)}
@@ -3886,7 +3885,7 @@ Encore Portal Admin`;
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="editUserRole">Role</Label>
-                              <select 
+                              <select
                                 id="editUserRole"
                                 value={editUserRole}
                                 onChange={(e) => setEditUserRole(e.target.value as 'super_admin' | 'marketing' | 'user')}
@@ -3900,8 +3899,8 @@ Encore Portal Admin`;
                           </div>
                           <DialogFooter>
                             <Button variant="ghost" onClick={() => setIsEditUserOpen(false)}>Cancel</Button>
-                            <Button 
-                              onClick={handleUpdateUser} 
+                            <Button
+                              onClick={handleUpdateUser}
                               disabled={isUpdatingUser}
                               className="bg-brand-600 hover:bg-brand-700 text-white"
                             >
@@ -3940,7 +3939,7 @@ Encore Portal Admin`;
                                   {filteredUsers.map((u) => {
                                     const isSelf = u.uid === user?.uid;
                                     const isInvitationOnly = u.uid.startsWith('invite_');
-                                    
+
                                     return (
                                       <tr key={u.uid} className="hover:bg-gray-50/45 transition-colors">
                                         <td className="py-4 px-4 flex items-center gap-3">
@@ -4007,11 +4006,10 @@ Encore Portal Admin`;
                                                   size="sm"
                                                   type="button"
                                                   onClick={() => handleToggleUserStatus(u)}
-                                                  className={`h-8 text-[11px] font-medium flex items-center gap-1 transition-all ${
-                                                    u.status === 'active'
+                                                  className={`h-8 text-[11px] font-medium flex items-center gap-1 transition-all ${u.status === 'active'
                                                       ? 'border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800'
                                                       : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800'
-                                                  }`}
+                                                    }`}
                                                 >
                                                   {u.status === 'active' ? (
                                                     <>
@@ -4064,7 +4062,7 @@ Encore Portal Admin`;
                                                     <Mail className="w-3.5 h-3.5" />
                                                   </Button>
                                                 )}
-                                                
+
                                                 <Button
                                                   variant="outline"
                                                   size="sm"
@@ -4116,10 +4114,10 @@ Encore Portal Admin`;
                 </DialogDescription>
               </div>
               {(selectedHistory?.failedCount || 0) > 0 && (
-                <Button 
-                  size="sm" 
-                  variant="outline" 
-                  className="text-red-700 bg-red-50 border-red-200 hover:bg-red-100 whitespace-nowrap shrink-0" 
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-red-700 bg-red-50 border-red-200 hover:bg-red-100 whitespace-nowrap shrink-0"
                   onClick={() => handleRetryFailedEmails()}
                 >
                   <RefreshCw className="w-4 h-4 mr-2" />
@@ -4180,8 +4178,8 @@ Encore Portal Admin`;
                     >
                       <XAxis type="number" hide />
                       <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6b7280' }} />
-                      <Tooltip 
-                        cursor={{fill: 'transparent'}}
+                      <Tooltip
+                        cursor={{ fill: 'transparent' }}
                         contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px', padding: '4px 8px' }}
                       />
                       <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
@@ -4201,7 +4199,7 @@ Encore Portal Admin`;
               </div>
             </div>
             <Separator />
-            
+
             {/* If we have full rawContacts data, we show exact personalized preview */}
             {selectedHistory?.rawContacts && selectedHistory.rawContacts.length > 0 ? (() => {
               const filteredList = selectedHistory.rawContacts
@@ -4209,14 +4207,14 @@ Encore Portal Admin`;
                 .filter(({ rc }) => {
                   if (selectedHistoryRecipientFilter === 'success' && rc.status !== 'success') return false;
                   if (selectedHistoryRecipientFilter === 'failed' && rc.status !== 'failed') return false;
-                  
+
                   if (selectedHistoryRecipientSearch.trim()) {
                     const query = selectedHistoryRecipientSearch.toLowerCase().trim();
                     const emailMatches = rc.email?.toLowerCase().includes(query);
                     const nameMatches = rc.name?.toLowerCase().includes(query);
                     return emailMatches || nameMatches;
                   }
-                  
+
                   return true;
                 });
 
@@ -4224,7 +4222,7 @@ Encore Portal Admin`;
                 Math.max(0, selectedHistoryRecipientIndex),
                 Math.max(0, filteredList.length - 1)
               );
-              
+
               const activeRecipient = filteredList[safeIndex]?.rc;
 
               return (
@@ -4238,7 +4236,7 @@ Encore Portal Admin`;
                           {filteredList.length} matching
                         </Badge>
                       </div>
-                      
+
                       {/* Live search */}
                       <div className="relative">
                         <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
@@ -4252,7 +4250,7 @@ Encore Portal Admin`;
                           className="pl-8 h-8 text-xs bg-white"
                         />
                       </div>
-                      
+
                       {/* filter selectors */}
                       <div className="grid grid-cols-3 gap-1 p-1 bg-gray-100/80 rounded-lg text-[10px]">
                         <button
@@ -4260,11 +4258,10 @@ Encore Portal Admin`;
                             setSelectedHistoryRecipientFilter('all');
                             setSelectedHistoryRecipientIndex(0);
                           }}
-                          className={`py-1 rounded-md transition-all font-medium text-center ${
-                            selectedHistoryRecipientFilter === 'all'
+                          className={`py-1 rounded-md transition-all font-medium text-center ${selectedHistoryRecipientFilter === 'all'
                               ? 'bg-white shadow-sm text-brand-900 font-semibold'
                               : 'text-gray-500 hover:text-gray-900'
-                          }`}
+                            }`}
                         >
                           All ({selectedHistory.rawContacts.length})
                         </button>
@@ -4273,11 +4270,10 @@ Encore Portal Admin`;
                             setSelectedHistoryRecipientFilter('success');
                             setSelectedHistoryRecipientIndex(0);
                           }}
-                          className={`py-1 rounded-md transition-all font-medium flex items-center justify-center gap-1 ${
-                            selectedHistoryRecipientFilter === 'success'
+                          className={`py-1 rounded-md transition-all font-medium flex items-center justify-center gap-1 ${selectedHistoryRecipientFilter === 'success'
                               ? 'bg-white shadow-sm text-green-700 font-semibold'
                               : 'text-gray-500 hover:text-green-700'
-                          }`}
+                            }`}
                         >
                           <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                           Sent ({selectedHistory.rawContacts.filter(c => c.status === 'success').length})
@@ -4287,11 +4283,10 @@ Encore Portal Admin`;
                             setSelectedHistoryRecipientFilter('failed');
                             setSelectedHistoryRecipientIndex(0);
                           }}
-                          className={`py-1 rounded-md transition-all font-medium flex items-center justify-center gap-1 ${
-                            selectedHistoryRecipientFilter === 'failed'
+                          className={`py-1 rounded-md transition-all font-medium flex items-center justify-center gap-1 ${selectedHistoryRecipientFilter === 'failed'
                               ? 'bg-white shadow-sm text-red-700 font-semibold'
                               : 'text-gray-500 hover:text-red-700'
-                          }`}
+                            }`}
                         >
                           <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
                           Error ({selectedHistory.rawContacts.filter(c => c.status === 'failed').length})
@@ -4309,11 +4304,10 @@ Encore Portal Admin`;
                               <button
                                 key={originalIdx}
                                 onClick={() => setSelectedHistoryRecipientIndex(idx)}
-                                className={`w-full text-left p-2 rounded-md transition-all flex items-start gap-2.5 text-xs ${
-                                  isSelected
+                                className={`w-full text-left p-2 rounded-md transition-all flex items-start gap-2.5 text-xs ${isSelected
                                     ? 'bg-brand-50 text-brand-900 border border-brand-200/60 font-medium'
                                     : 'hover:bg-gray-50 text-gray-700 border border-transparent'
-                                }`}
+                                  }`}
                               >
                                 <div className="mt-1 shrink-0">
                                   {rc.status === 'success' ? (
@@ -4355,18 +4349,18 @@ Encore Portal Admin`;
                             Index {safeIndex + 1} of {filteredList.length} matching
                           </p>
                           <div className="flex items-center gap-1.5">
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              variant="outline"
+                              size="sm"
                               className="h-7 text-xs px-2.5"
                               onClick={() => setSelectedHistoryRecipientIndex(prev => Math.max(0, prev - 1))}
                               disabled={safeIndex === 0}
                             >
                               Prev
                             </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
+                            <Button
+                              variant="outline"
+                              size="sm"
                               className="h-7 text-xs px-2.5"
                               onClick={() => setSelectedHistoryRecipientIndex(prev => Math.min(filteredList.length - 1, prev + 1))}
                               disabled={safeIndex === filteredList.length - 1}
@@ -4397,7 +4391,7 @@ Encore Portal Admin`;
                             <div className="p-3 bg-gray-50/70 rounded-lg border border-gray-100 text-xs">
                               <div className="font-bold text-gray-900">{activeRecipient.email}</div>
                               {activeRecipient.name && <div className="text-gray-500 mt-0.5">({activeRecipient.name})</div>}
-                              
+
                               {activeRecipient.error && (
                                 <div className="mt-2 pt-2 border-t border-red-100">
                                   <div className="text-red-800 font-semibold mb-1 flex items-center gap-1 text-[10px] uppercase tracking-wider">
@@ -4423,7 +4417,7 @@ Encore Portal Admin`;
                           {/* Email Body text */}
                           <div className="space-y-1 pb-2">
                             <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider font-semibold">Personalized Email Body</p>
-                            <div 
+                            <div
                               className="text-xs text-gray-750 p-3 bg-gray-50/70 rounded-lg border border-gray-100 whitespace-pre-wrap leading-relaxed max-h-[180px] overflow-y-auto font-sans"
                               dangerouslySetInnerHTML={{ __html: replacePlaceholders(selectedHistory.body, activeRecipient, true) }}
                             />
@@ -4518,10 +4512,36 @@ Encore Portal Admin`;
 
               {/* Right: Actions */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative' }}>
+                {/* Templates Library */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    onClick={() => { setShowTemplatesPanel(p => !p); setShowLoadDesignPanel(false); setShowSaveDesignPanel(false); }}
+                    style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12 }}
+                  >
+                    📚 Templates
+                  </button>
+                  {showTemplatesPanel && (
+                    <div style={{ position: 'absolute', top: 36, right: 0, width: 280, background: '#fff', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)', zIndex: 10, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+                      <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', fontSize: 12, fontWeight: 700, color: '#334155' }}>📚 Built-in Templates</div>
+                      <div style={{ maxHeight: 250, overflowY: 'auto' }}>
+                        {TEMPLATES.map((t, i) => (
+                          <div key={i} style={{ padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f8fafc', cursor: 'pointer' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{t.name}</div>
+                            <button onClick={() => { handleLoadDesign(t.design); setShowTemplatesPanel(false); }} style={{ background: '#102CA4', color: '#fff', border: 'none', borderRadius: 4, padding: '3px 8px', fontSize: 11, cursor: 'pointer' }}>Use</button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* Load Design */}
                 <div style={{ position: 'relative' }}>
                   <button
-                    onClick={() => { setShowLoadDesignPanel(p => !p); setShowSaveDesignPanel(false); if (!showLoadDesignPanel) loadSavedDesigns(); }}
+                    onClick={() => { setShowLoadDesignPanel(p => !p); setShowTemplatesPanel(false); setShowSaveDesignPanel(false); if (!showLoadDesignPanel) loadSavedDesigns(); }}
                     style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: '1px solid rgba(255,255,255,0.25)', borderRadius: 6, padding: '5px 14px', cursor: 'pointer', fontSize: 12 }}
                   >
                     📂 Load Design
@@ -4619,7 +4639,7 @@ Encore Portal Admin`;
                 onLoad={() => {
                   if (emailEditorRef.current) {
                     const editor = emailEditorRef.current.editor;
-                    
+
                     editor.registerCallback('image', async (file: File, done: (data: any) => void) => {
                       const toastId = toast.loading('Uploading image...');
                       try {
@@ -4665,7 +4685,7 @@ Encore Portal Admin`;
             {(() => {
               const previewSubject = subject || '';
               const previewBody = body || '';
-              
+
               const sampleContact: Contact = {
                 id: 'sample-id',
                 email: 'jeffrey@example.com',
@@ -4685,9 +4705,9 @@ Encore Portal Admin`;
 
               const htmlContent = generateEmailHtml(replacedSubject, replacedBody);
               return (
-                <div 
+                <div
                   className="w-full max-w-[600px] shadow-sm bg-white rounded-lg overflow-hidden"
-                  dangerouslySetInnerHTML={{ __html: htmlContent }} 
+                  dangerouslySetInnerHTML={{ __html: htmlContent }}
                 />
               );
             })()}
