@@ -381,9 +381,11 @@ export default function App() {
     setIsSavingDesign(true);
     emailEditorRef.current.editor.exportHtml(async (data: any) => {
       try {
+        // Firestore rejects undefined values — sanitize by round-tripping through JSON
+        const cleanDesign = JSON.parse(JSON.stringify(data.design));
         await addDoc(collection(db, 'users', user.uid, 'emailDesigns'), {
           name: saveDesignName.trim(),
-          design: data.design,
+          design: cleanDesign,
           createdAt: new Date().toISOString(),
         });
         toast.success(`Design "${saveDesignName.trim()}" saved!`);
