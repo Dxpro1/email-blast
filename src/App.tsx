@@ -68,6 +68,7 @@ import { auth, db, storage, signInWithGoogle, signInWithEmailAndPassword, create
 import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { DEFAULT_ENCORE_DESIGN } from './lib/defaultDesign';
 
 // Initialize Gemini is handled server-side to protect keys and prevent browser environment crashes
 
@@ -4532,8 +4533,28 @@ Encore Portal Admin`;
               <EmailEditor
                 ref={emailEditorRef}
                 onLoad={() => {
-                  if (visualDesign && emailEditorRef.current) {
-                    emailEditorRef.current.editor.loadDesign(visualDesign);
+                  if (emailEditorRef.current) {
+                    const editor = emailEditorRef.current.editor;
+                    
+                    editor.registerCallback('image', async (file: File, done: (data: any) => void) => {
+                      const toastId = toast.loading('Uploading image...');
+                      try {
+                        const storageRef = ref(storage, `builder/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.]/g, '_')}`);
+                        await uploadBytes(storageRef, file);
+                        const url = await getDownloadURL(storageRef);
+                        toast.success('Image uploaded successfully!', { id: toastId });
+                        done({ progress: 100, url });
+                      } catch (err: any) {
+                        console.error('Builder upload error:', err);
+                        toast.error('Upload failed: ' + err.message, { id: toastId });
+                      }
+                    });
+
+                    if (visualDesign) {
+                      editor.loadDesign(visualDesign);
+                    } else {
+                      editor.loadDesign(DEFAULT_ENCORE_DESIGN);
+                    }
                   }
                 }}
                 options={{

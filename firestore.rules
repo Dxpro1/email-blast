@@ -44,6 +44,14 @@ service cloud.firestore {
         allow list, get, delete: if isOwner(userId);
         allow create, update: if isOwner(userId) && isValidHistory(request.resource.data);
       }
+
+      match /emailDesigns/{designId} {
+        allow list, get, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasAll(['name', 'design', 'createdAt'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() <= 200;
+      }
     }
     
     match /test/connection {
