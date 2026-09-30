@@ -1428,7 +1428,7 @@ Encore Portal Admin`;
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.08); background-color: #ffffff;">
           <!-- Corporate Branding Header -->
           <div style="background-color: #ffffff; padding: 25px 20px; text-align: center; border-bottom: 1px solid #f1f5f9;">
-            <img src="https://email-blast-sandy.vercel.app/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore Leasing & Finance Corp." style="height: 55px; width: auto; max-width: 100%; display: inline-block;" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Celebration Banner -->
@@ -1475,7 +1475,7 @@ Encore Portal Admin`;
         <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #f4f7f6;">
           <!-- Header -->
           <div style="background-color: #102CA4; padding: 30px 20px; text-align: center;">
-            <img src="https://email-blast-sandy.vercel.app/assets/img/logo.png" alt="Encore Leasing & Finance Corp." style="height: 50px; width: auto; max-width: 100%; display: inline-block; filter: brightness(0) invert(1);" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-light.png" alt="Encore Leasing & Finance Corp." style="height: 50px; width: auto; max-width: 100%; display: inline-block; filter: brightness(0) invert(1);" referrerPolicy="no-referrer" />
           </div>
 
           <!-- Hero Image area (Optional/Abstract) -->
@@ -1545,7 +1545,7 @@ Encore Portal Admin`;
           </div>
           
           <div style="padding: 40px 40px 20px 40px; border-bottom: 2px solid #f1f5f9; display: flex; align-items: center; justify-content: space-between;">
-            <img src="https://email-blast-sandy.vercel.app/assets/img/logo.png" alt="Encore" style="height: 45px; width: auto;" referrerPolicy="no-referrer" />
+            <img src="https://encorefinancials.com/assets/images/application-settings/logo-dark.png" alt="Encore" style="height: 45px; width: auto;" referrerPolicy="no-referrer" />
           </div>
           
           <div style="padding: 40px;">
