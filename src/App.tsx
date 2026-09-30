@@ -4323,51 +4323,68 @@ Encore Portal Admin`;
         </DialogContent>
       </Dialog>
 
-      {/* Template Preview Dialog */}
-      <Dialog open={isVisualEditorOpen} onOpenChange={setIsVisualEditorOpen}>
-        <DialogContent className="max-w-[100vw] w-screen h-screen max-h-[100vh] p-0 m-0 rounded-none border-0 flex flex-col bg-gray-100">
-          <div className="bg-brand-900 text-white px-4 py-3 flex items-center justify-between shadow-md z-10 shrink-0">
-            <div className="flex items-center gap-2">
-              <LayoutDashboard className="w-5 h-5 text-brand-200" />
-              <h2 className="font-semibold text-sm">Visual Email Builder</h2>
+      {/* Visual Builder Fullscreen Overlay */}
+      <AnimatePresence>
+        {isVisualEditorOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', flexDirection: 'column', background: '#f1f5f9' }}
+          >
+            {/* Toolbar */}
+            <div style={{ background: '#102CA4', color: '#fff', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 2px 8px rgba(0,0,0,0.2)', flexShrink: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <LayoutDashboard style={{ width: 18, height: 18, opacity: 0.8 }} />
+                <span style={{ fontWeight: 700, fontSize: 15 }}>Visual Email Builder</span>
+                <span style={{ fontSize: 11, background: 'rgba(255,255,255,0.15)', padding: '2px 10px', borderRadius: 20, marginLeft: 6, letterSpacing: 1 }}>BETA</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button
+                  onClick={() => setIsVisualEditorOpen(false)}
+                  style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6, padding: '6px 16px', cursor: 'pointer', fontSize: 13 }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (emailEditorRef.current) {
+                      emailEditorRef.current.editor.exportHtml((data: any) => {
+                        const { design, html } = data;
+                        setVisualDesign(design);
+                        setBody(html);
+                        setIsVisualEditorOpen(false);
+                        toast.success('Design saved! Ready to send.');
+                      });
+                    }
+                  }}
+                  style={{ background: '#FFDF00', color: '#102CA4', border: 'none', borderRadius: 6, padding: '6px 20px', fontWeight: 700, cursor: 'pointer', fontSize: 13 }}
+                >
+                  ✓ Save & Apply Design
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="sm" onClick={() => setIsVisualEditorOpen(false)} className="text-brand-100 hover:text-white hover:bg-brand-800">
-                Cancel
-              </Button>
-              <Button size="sm" onClick={() => {
-                if (emailEditorRef.current) {
-                  emailEditorRef.current.editor.exportHtml((data) => {
-                    const { design, html } = data;
-                    setVisualDesign(design);
-                    setBody(html); // Save compiled HTML into body
-                    setIsVisualEditorOpen(false);
-                    toast.success('Design saved successfully!');
-                  });
-                }
-              }} className="bg-white text-brand-900 hover:bg-brand-50 font-bold">
-                Save & Apply Design
-              </Button>
+
+            {/* Editor Canvas */}
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              <EmailEditor
+                ref={emailEditorRef}
+                onLoad={() => {
+                  if (visualDesign && emailEditorRef.current) {
+                    emailEditorRef.current.editor.loadDesign(visualDesign);
+                  }
+                }}
+                options={{
+                  appearance: { theme: 'light' },
+                  projectId: undefined,
+                }}
+                style={{ height: '100%', width: '100%' }}
+              />
             </div>
-          </div>
-          <div className="flex-1 w-full relative overflow-hidden">
-            <EmailEditor 
-              ref={emailEditorRef} 
-              onLoad={() => {
-                if (visualDesign && emailEditorRef.current) {
-                  emailEditorRef.current.editor.loadDesign(visualDesign);
-                }
-              }}
-              options={{
-                appearance: {
-                  theme: 'light',
-                },
-              }}
-              style={{ height: '100%', width: '100%' }}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-2xl">
