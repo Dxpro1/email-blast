@@ -4367,7 +4367,7 @@ Encore Portal Admin`;
             </div>
 
             {/* Editor Canvas */}
-            <div style={{ flex: 1, overflow: 'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden', height: 'calc(100vh - 52px)' }}>
               <EmailEditor
                 ref={emailEditorRef}
                 onLoad={() => {
@@ -4379,7 +4379,7 @@ Encore Portal Admin`;
                   appearance: { theme: 'light' },
                   projectId: undefined,
                 }}
-                style={{ height: '100%', width: '100%' }}
+                style={{ height: 'calc(100vh - 52px)', width: '100%', display: 'block' }}
               />
             </div>
           </motion.div>
