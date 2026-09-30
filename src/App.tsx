@@ -1452,7 +1452,6 @@ Encore Portal Admin`;
                 "May this special day bring you endless joy, success, and prosperity in all your endeavors. We are truly honored to have you as a valued part of our Encore family!"
               </p>
             </div>
-
           </div>
           
           <!-- Footer -->
