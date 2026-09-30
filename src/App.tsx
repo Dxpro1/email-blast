@@ -4484,7 +4484,7 @@ Encore Portal Admin`;
                         value={saveDesignName}
                         onChange={e => setSaveDesignName(e.target.value)}
                         onKeyDown={e => e.key === 'Enter' && handleSaveDesign()}
-                        style={{ width: '100%', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: 13, outline: 'none', marginBottom: 8, boxSizing: 'border-box' }}
+                        style={{ width: '100%', border: '1px solid #e2e8f0', borderRadius: 6, padding: '6px 10px', fontSize: 13, outline: 'none', marginBottom: 8, boxSizing: 'border-box', color: '#1e293b', background: '#fff' }}
                         autoFocus
                       />
                       <button
