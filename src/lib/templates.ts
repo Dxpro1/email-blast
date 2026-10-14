@@ -3,7 +3,7 @@ import { DEFAULT_ENCORE_DESIGN } from './defaultDesign';
 const logoRow = DEFAULT_ENCORE_DESIGN.body.rows[0];
 const footerRow = DEFAULT_ENCORE_DESIGN.body.rows[2];
 
-export const TEMPLATES = [
+export const BUILDER_TEMPLATES = [
   {
     name: 'Basic Layout',
     design: DEFAULT_ENCORE_DESIGN

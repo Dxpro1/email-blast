@@ -69,7 +69,7 @@ import { onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, setDoc, getDocs, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { DEFAULT_ENCORE_DESIGN } from './lib/defaultDesign';
-import { TEMPLATES } from './lib/templates';
+import { BUILDER_TEMPLATES } from './lib/templates';
 
 // Initialize Gemini is handled server-side to protect keys and prevent browser environment crashes
 
@@ -154,6 +154,7 @@ If you wish to renew the insurance on your own, kindly provide us with a copy of
 If we do not receive your renewed policy within this period, <b>ELFC will arrange the renewal of the insurance policy on your behalf</b>.
 
 <b>Vehicle Details:</b>
+<b>Loan No.:</b> #loannumber
 <b>Year Model:</b> #yearmodel
 <b>Unit:</b> #unit
 <b>Plate No.:</b> #plate
@@ -169,7 +170,7 @@ Thank you, <b>#firstname</b>, for your continued trust in <b>Encore Leasing & Fi
     subject: 'PDC Reminder - Encore Leasing & Finance Corp.',
     body: `Dear <b>#firstname</b>,
 
-Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>#amount</b>. If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>#amount</b> (Loan No.: <b>#loannumber</b>). If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
 
 If you have not issued a check, you may conveniently settle your insurance premium through any of our available payment channels, including <b>GCash, 7-Eleven, Maya, Cebuana Lhuillier, ECPay, and BDO</b>.
 
@@ -209,7 +210,7 @@ Warmest wishes from your <b>Encore Leasing & Finance Corp. Family!</b> 💙`
     subject: 'Payment Reminder - Encore Leasing & Finance Corp.',
     body: `Dear <b>#firstname</b>,
 
-Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your <b>monthly loan amortization of #periodicins</b>, which is due on <b>#ddate</b>.
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your <b>monthly loan amortization of #periodicins</b> (Loan No.: <b>#loannumber</b>), which is due on <b>#ddate</b>.
 
 If you have an issued check, kindly make sure that sufficient funds are available for deposit on the said date.
 
@@ -1092,7 +1093,7 @@ Encore Portal Admin`;
         setCsvData(results.data);
 
         const initialMapping: Record<string, string> = {
-          email: '', name: '', firstname: '', yearmodel: '',
+          email: '', name: '', firstname: '', loannumber: '', yearmodel: '',
           unit: '', plate: '', expiry: '', amount: '',
           ddate: '', periodicins: ''
         };
@@ -1108,6 +1109,9 @@ Encore Portal Admin`;
           }
           if (!initialMapping.name && (cleanF.includes('name') && !cleanF.includes('first'))) {
             initialMapping.name = f;
+          }
+          if (!initialMapping.loannumber && (cleanF.includes('loannumber') || cleanF.includes('loanno') || cleanF.includes('loan') || cleanF.includes('pnno') || cleanF.includes('accountno') || cleanF.includes('acctno') || cleanF.includes('contractno'))) {
+            initialMapping.loannumber = f;
           }
           if (!initialMapping.yearmodel && (cleanF.includes('yearmodel') || cleanF.includes('model') || cleanF.includes('year'))) {
             initialMapping.yearmodel = f;
@@ -1151,6 +1155,7 @@ Encore Portal Admin`;
       let email = csvMapping.email ? String(row[csvMapping.email] || '').trim() : '';
       let name = csvMapping.name ? String(row[csvMapping.name] || '').trim() : '';
       let firstname = csvMapping.firstname ? String(row[csvMapping.firstname] || '').trim() : '';
+      let loannumber = csvMapping.loannumber ? String(row[csvMapping.loannumber] || '').trim() : '';
       let yearmodel = csvMapping.yearmodel ? String(row[csvMapping.yearmodel] || '').trim() : '';
       let unit = csvMapping.unit ? String(row[csvMapping.unit] || '').trim() : '';
       let plate = csvMapping.plate ? String(row[csvMapping.plate] || '').trim() : '';
@@ -1158,6 +1163,16 @@ Encore Portal Admin`;
       let amount = csvMapping.amount ? String(row[csvMapping.amount] || '').trim() : '';
       let ddate = csvMapping.ddate ? String(row[csvMapping.ddate] || '').trim() : '';
       let periodicins = csvMapping.periodicins ? String(row[csvMapping.periodicins] || '').trim() : '';
+
+      if (!loannumber) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('loannumber') || cleanK.includes('loanno') || cleanK === 'loan' || cleanK.includes('pnno') || cleanK.includes('accountno')) {
+            loannumber = String(row[k] || '').trim();
+            if (loannumber) break;
+          }
+        }
+      }
 
       if (expiry) expiry = formatToLongDate(expiry);
       if (ddate) ddate = formatToLongDate(ddate);
@@ -1174,6 +1189,12 @@ Encore Portal Admin`;
         createdAt: new Date().toISOString()
       };
 
+      if (loannumber) {
+        normalizedContact.loannumber = loannumber;
+        normalizedContact.loanno = loannumber;
+        normalizedContact.loan_no = loannumber;
+        normalizedContact.loan = loannumber;
+      }
       if (yearmodel) normalizedContact.yearmodel = yearmodel;
       if (unit) normalizedContact.unit = unit;
       if (plate) normalizedContact.plate = plate;
@@ -1276,7 +1297,7 @@ Encore Portal Admin`;
     // Check if the key indicates a monetary or general formatted amount/number
     // We definitely want to exclude keys that we should NOT format:
     // year, model, plate, expiry, date, phone, mobile, id, email, zip, code, pin, bday, birthday, timestamp, createdat, ref, index, number, account
-    const excludedKeys = ['year', 'model', 'plate', 'expiry', 'date', 'phone', 'mobile', 'id', 'email', 'zip', 'code', 'pin', 'bday', 'birthday', 'timestamp', 'createdat', 'ref', 'index', 'number', 'no', 'account', 'card', 'cvv'];
+    const excludedKeys = ['year', 'model', 'plate', 'expiry', 'date', 'phone', 'mobile', 'id', 'email', 'zip', 'code', 'pin', 'bday', 'birthday', 'timestamp', 'createdat', 'ref', 'index', 'number', 'no', 'account', 'card', 'cvv', 'loan'];
     const isExcluded = excludedKeys.some(ex => lowerKey.includes(ex));
 
     // Check if it's a financial key
@@ -2948,7 +2969,7 @@ Encore Portal Admin`;
                             <DialogHeader>
                               <DialogTitle>Import Contacts from CSV</DialogTitle>
                               <DialogDescription>
-                                Upload a CSV file to bulk add contacts. We support placeholders like #firstname, #yearmodel, etc.
+                                Upload a CSV file to bulk add contacts. We support placeholders like #firstname, #loannumber, #yearmodel, etc.
                               </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4 py-4">
@@ -2977,7 +2998,7 @@ Encore Portal Admin`;
                               <div className="bg-brand-50 p-3 rounded-lg flex gap-3">
                                 <Info className="w-5 h-5 text-brand-600 shrink-0" />
                                 <p className="text-xs text-brand-800 leading-relaxed">
-                                  <strong>Tip:</strong> Ensure your CSV has an <strong>email</strong> column and a <strong>firstname</strong> column. Other columns like <strong>plate</strong> or <strong>amount</strong> will be used for placeholders.
+                                  <strong>Tip:</strong> Ensure your CSV has an <strong>email</strong> column and a <strong>firstname</strong> column. Other columns like <strong>loannumber</strong>, <strong>plate</strong> or <strong>amount</strong> will be used for placeholders.
                                 </p>
                               </div>
                             </div>
@@ -4524,7 +4545,7 @@ Encore Portal Admin`;
                     <div style={{ position: 'absolute', top: 36, right: 0, width: 280, background: '#fff', borderRadius: 8, boxShadow: '0 8px 30px rgba(0,0,0,0.15)', zIndex: 10, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
                       <div style={{ padding: '10px 14px', borderBottom: '1px solid #f1f5f9', fontSize: 12, fontWeight: 700, color: '#334155' }}>📚 Built-in Templates</div>
                       <div style={{ maxHeight: 250, overflowY: 'auto' }}>
-                        {TEMPLATES.map((t, i) => (
+                        {BUILDER_TEMPLATES.map((t, i) => (
                           <div key={i} style={{ padding: '8px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f8fafc', cursor: 'pointer' }}
                             onMouseEnter={e => (e.currentTarget.style.background = '#f8fafc')}
                             onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
@@ -4691,6 +4712,8 @@ Encore Portal Admin`;
                 email: 'jeffrey@example.com',
                 name: 'JEFFREY DAM',
                 firstname: 'JEFFREY',
+                loannumber: 'LN-2024-0891',
+                loanno: 'LN-2024-0891',
                 yearmodel: '2024',
                 unit: 'Toyota Fortuner',
                 plate: 'ABC 1234',
