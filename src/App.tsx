@@ -154,7 +154,7 @@ If you wish to renew the insurance on your own, kindly provide us with a copy of
 If we do not receive your renewed policy within this period, <b>ELFC will arrange the renewal of the insurance policy on your behalf</b>.
 
 <b>Vehicle Details:</b>
-<b>Loan No.:</b> #loannumber
+<b>Loan ID:</b> #loanid
 <b>Year Model:</b> #yearmodel
 <b>Unit:</b> #unit
 <b>Plate No.:</b> #plate
@@ -170,7 +170,7 @@ Thank you, <b>#firstname</b>, for your continued trust in <b>Encore Leasing & Fi
     subject: 'PDC Reminder - Encore Leasing & Finance Corp.',
     body: `Dear <b>#firstname</b>,
 
-Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>#amount</b> (Loan No.: <b>#loannumber</b>). If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your insurance premium of <b>#amount</b> (Loan ID: <b>#loanid</b>). If you have issued a post-dated check for this payment, please be advised that it will be deposited on <b>#ddate</b>. Kindly ensure that sufficient funds are available in your account.
 
 If you have not issued a check, you may conveniently settle your insurance premium through any of our available payment channels, including <b>GCash, 7-Eleven, Maya, Cebuana Lhuillier, ECPay, and BDO</b>.
 
@@ -210,7 +210,7 @@ Warmest wishes from your <b>Encore Leasing & Finance Corp. Family!</b> 💙`
     subject: 'Payment Reminder - Encore Leasing & Finance Corp.',
     body: `Dear <b>#firstname</b>,
 
-Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your <b>monthly loan amortization of #periodicins</b> (Loan No.: <b>#loannumber</b>), which is due on <b>#ddate</b>.
+Just a friendly reminder from <b>Encore Leasing and Finance Corp. (ELFC)</b> regarding your <b>monthly loan amortization of #periodicins</b> (Loan ID: <b>#loanid</b>), which is due on <b>#ddate</b>.
 
 If you have an issued check, kindly make sure that sufficient funds are available for deposit on the said date.
 
@@ -1107,10 +1107,10 @@ Encore Portal Admin`;
           if (!initialMapping.firstname && (cleanF.includes('firstname') || cleanF.includes('first') || cleanF.includes('givenname') || cleanF.includes('given'))) {
             initialMapping.firstname = f;
           }
-          if (!initialMapping.name && (cleanF.includes('name') && !cleanF.includes('first'))) {
+          if (!initialMapping.name && (cleanF.includes('name') && !cleanF.includes('first') && !cleanF.includes('plate'))) {
             initialMapping.name = f;
           }
-          if (!initialMapping.loannumber && (cleanF.includes('loannumber') || cleanF.includes('loanno') || cleanF.includes('loan') || cleanF.includes('pnno') || cleanF.includes('accountno') || cleanF.includes('acctno') || cleanF.includes('contractno'))) {
+          if (!initialMapping.loannumber && (cleanF.includes('loan') || cleanF.includes('pnno') || cleanF.includes('accountno') || cleanF.includes('acctno') || cleanF.includes('contractno'))) {
             initialMapping.loannumber = f;
           }
           if (!initialMapping.yearmodel && (cleanF.includes('yearmodel') || cleanF.includes('model') || cleanF.includes('year'))) {
@@ -1125,15 +1125,15 @@ Encore Portal Admin`;
           if (!initialMapping.expiry && (cleanF.includes('expiry') || cleanF.includes('expire') || cleanF.includes('expiration'))) {
             initialMapping.expiry = f;
           }
-          if (!initialMapping.amount && (cleanF.includes('amount') || cleanF.includes('premium') || cleanF.includes('check') || (cleanF.includes('payment') && !cleanF.includes('date')))) {
+          if (!initialMapping.amount && (cleanF.includes('amount') || cleanF.includes('paymentamount') || cleanF.includes('premium') || cleanF.includes('check') || (cleanF.includes('payment') && !cleanF.includes('date')))) {
             initialMapping.amount = f;
           }
-          if (!initialMapping.ddate && (cleanF.includes('duedate') || cleanF.includes('ddate') || cleanF.includes('due') || cleanF.includes('date') || cleanF.includes('birthday'))) {
+          if (!initialMapping.ddate && (cleanF.includes('duedate') || cleanF.includes('paymentdate') || cleanF.includes('ddate') || cleanF.includes('due') || cleanF.includes('date') || cleanF.includes('birthday'))) {
             if (!cleanF.includes('expiry') && !cleanF.includes('expire') && !cleanF.includes('expiration')) {
               initialMapping.ddate = f;
             }
           }
-          if (!initialMapping.periodicins && (cleanF.includes('periodicins') || cleanF.includes('amortization') || cleanF.includes('periodic') || cleanF.includes('installment'))) {
+          if (!initialMapping.periodicins && (cleanF.includes('periodicins') || cleanF.includes('periodicinstallment') || cleanF.includes('amortization') || cleanF.includes('periodic') || cleanF.includes('installment'))) {
             initialMapping.periodicins = f;
           }
         });
@@ -1164,14 +1164,95 @@ Encore Portal Admin`;
       let ddate = csvMapping.ddate ? String(row[csvMapping.ddate] || '').trim() : '';
       let periodicins = csvMapping.periodicins ? String(row[csvMapping.periodicins] || '').trim() : '';
 
+      // Fallback searches across row keys if unmapped
+      if (!email) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('email')) { email = String(row[k] || '').trim(); if (email) break; }
+        }
+      }
+      if (!firstname) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('firstname') || cleanK.includes('first')) { firstname = String(row[k] || '').trim(); if (firstname) break; }
+        }
+      }
       if (!loannumber) {
         for (const k of Object.keys(row)) {
           const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
-          if (cleanK.includes('loannumber') || cleanK.includes('loanno') || cleanK === 'loan' || cleanK.includes('pnno') || cleanK.includes('accountno')) {
+          if (cleanK.includes('loan') || cleanK.includes('pnno') || cleanK.includes('accountno')) {
             loannumber = String(row[k] || '').trim();
             if (loannumber) break;
           }
         }
+      }
+      if (!periodicins) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('periodic') || cleanK.includes('installment') || cleanK.includes('amortization')) {
+            periodicins = String(row[k] || '').trim();
+            if (periodicins) break;
+          }
+        }
+      }
+      if (!amount) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('amount') || (cleanK.includes('payment') && !cleanK.includes('date'))) {
+            amount = String(row[k] || '').trim();
+            if (amount) break;
+          }
+        }
+      }
+      if (!ddate) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if ((cleanK.includes('duedate') || cleanK.includes('paymentdate') || cleanK.includes('ddate')) && !cleanK.includes('expiry')) {
+            ddate = String(row[k] || '').trim();
+            if (ddate) break;
+          }
+        }
+      }
+      if (!yearmodel) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('yearmodel') || cleanK.includes('model') || cleanK.includes('year')) {
+            yearmodel = String(row[k] || '').trim();
+            if (yearmodel) break;
+          }
+        }
+      }
+      if (!unit) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('unit') || cleanK.includes('vehicle')) {
+            unit = String(row[k] || '').trim();
+            if (unit) break;
+          }
+        }
+      }
+      if (!plate) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('plate')) {
+            plate = String(row[k] || '').trim();
+            if (plate) break;
+          }
+        }
+      }
+      if (!expiry) {
+        for (const k of Object.keys(row)) {
+          const cleanK = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+          if (cleanK.includes('expiry') || cleanK.includes('expire')) {
+            expiry = String(row[k] || '').trim();
+            if (expiry) break;
+          }
+        }
+      }
+
+      // Strip quotes and leading tabs from loannumber (e.g. from Odoo export "\t1000223958")
+      if (loannumber) {
+        loannumber = loannumber.replace(/^[\s\t\r\n'"]+|[\s\t\r\n'"]+$/g, '');
       }
 
       if (expiry) expiry = formatToLongDate(expiry);
@@ -1191,17 +1272,34 @@ Encore Portal Admin`;
 
       if (loannumber) {
         normalizedContact.loannumber = loannumber;
+        normalizedContact.loanid = loannumber;
         normalizedContact.loanno = loannumber;
         normalizedContact.loan_no = loannumber;
+        normalizedContact.loan_id = loannumber;
         normalizedContact.loan = loannumber;
       }
       if (yearmodel) normalizedContact.yearmodel = yearmodel;
       if (unit) normalizedContact.unit = unit;
-      if (plate) normalizedContact.plate = plate;
+      if (plate) {
+        normalizedContact.plate = plate;
+        normalizedContact.platenumber = plate;
+      }
       if (expiry) normalizedContact.expiry = expiry;
-      if (amount) normalizedContact.amount = amount;
-      if (ddate) normalizedContact.ddate = ddate;
-      if (periodicins) normalizedContact.periodicins = periodicins;
+      if (amount) {
+        normalizedContact.amount = amount;
+        normalizedContact.paymentamount = amount;
+      }
+      if (ddate) {
+        normalizedContact.ddate = ddate;
+        normalizedContact.duedate = ddate;
+        normalizedContact.paymentdate = ddate;
+      }
+      if (periodicins) {
+        normalizedContact.periodicins = periodicins;
+        normalizedContact.periodicinstallment = periodicins;
+        normalizedContact.installment = periodicins;
+        normalizedContact.amortization = periodicins;
+      }
 
       // Merge all original attributes just in case
       Object.keys(row).forEach(k => {
@@ -4709,18 +4807,20 @@ Encore Portal Admin`;
 
               const sampleContact: Contact = {
                 id: 'sample-id',
-                email: 'jeffrey@example.com',
-                name: 'JEFFREY DAM',
-                firstname: 'JEFFREY',
-                loannumber: 'LN-2024-0891',
-                loanno: 'LN-2024-0891',
-                yearmodel: '2024',
-                unit: 'Toyota Fortuner',
-                plate: 'ABC 1234',
-                expiry: 'Dec 31, 2026',
-                amount: '15000',
-                ddate: 'April 15, 2026',
-                periodicins: '12500'
+                email: 'jdvelarde@encorefinancials.com',
+                name: 'JOJI VELARDE',
+                firstname: 'JOJI',
+                loanid: '1000223958',
+                loannumber: '1000223958',
+                loanno: '1000223958',
+                loan: '1000223958',
+                yearmodel: '2023',
+                unit: 'TOYOTA VIOS 1.3 XLE CVT',
+                plate: 'NIP3689',
+                expiry: 'August 7, 2026',
+                amount: '6296.88',
+                ddate: 'July 15, 2026',
+                periodicins: '604'
               };
 
               const replacedSubject = previewSubject ? replacePlaceholders(previewSubject, sampleContact, false) : '';
